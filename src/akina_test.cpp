@@ -92,7 +92,7 @@ int main(int argc, char** argv) {
                 path, n, track.length, track.closed ? 1 : 0, track.title.c_str());
 
     check(!track.closed, "open course (closed == 0)", track.closed ? 1 : 0);
-    check(track.length > 9500.0f && track.length < 10500.0f, "length ~10000 m", track.length);
+    check(track.length > 7300.0f && track.length < 7800.0f, "length ~7552 m", track.length);
     check(n >= 1800, "sample count >= 1800", float(n));
 
     float minGap = 1e9f, maxGap = 0;
@@ -178,7 +178,7 @@ int main(int argc, char** argv) {
         }
         std::printf("self-test autopilot: travelled %.0f m, maxLat %.1f m\n", travelled, maxLat);
         check(finite, "self-test autopilot: finite state", finite ? 1 : 0);
-        check(travelled >= 1200.0f, "self-test autopilot: travelled >= 1200 m", travelled);
+        check(travelled >= 900.0f, "self-test autopilot: travelled >= 900 m", travelled);  // tight Goren hairpins sit early on this layout; the full-run check below is the real gate
         check(maxLat <= 30.0f, "self-test autopilot: stays near course", maxLat);
     }
 

@@ -6,10 +6,19 @@ Produces akina.txt in exactly the same format as suzuka.txt:
   header keys (origin / half_width / curb_width / length / spawn / names / samples)
   sample rows:  x z y cross bridge corner nameId
 
-The course is an OPEN downhill (point-to-point), ~10,000 m, laid out
-after the real Akina (Mt. Haruna) route map the user supplied:
-Ikaho start -> west along the ridge past Nagamine -> the Takane
-switchback cluster -> a long southern hook -> final hairpins.
+The course is an OPEN downhill (point-to-point) laid out after the
+Initial D style Akina course map the user supplied (2026-10-28):
+total 7,552 m with sections 1,680 / 1,692 / 1,884 / 2,026 m, starting
+at the BOTTOM-LEFT (south) end of the map and finishing at the
+top-right (north-east) end, with three check points in between.
+The map's section lengths sum to 7,282 m, so the design is built at
+x1.037 to match the printed total of 7,552 m.
+
+(A pixel trace of this diagram was attempted first: the drawn line is
+a white core inside a green glow, and the glow merges the tightest
+switchback clusters at this resolution, so the layout is instead
+built analytically from straights + constant-radius arcs following
+the map's shape section by section.)
 
 Geometry is built from straights + constant-radius arcs (analytic),
 then resampled at ~4 m. Elevation is a smooth grade profile integrated
@@ -20,133 +29,106 @@ import math
 import sys
 
 # ---------------------------------------------------------------- elements
-# Each element: ("line", length, name) or ("arc", radius, signed_deg, corner_no, name)
+# Each element: ("line", length, name) or ("arc", radius, signed_deg, name)
 # signed_deg > 0 = right turn (heading increases, compass style), < 0 = left.
 # heading: degrees, 0 = north (+z), 90 = east (+x). forward = (sin, cos).
+# Section targets are the map's printed lengths x1.037 (see docstring).
 
 SECTIONS = [
-    # Map layout (Ikaho -> west along the ridge -> Takane switchback cluster
-    # -> long southern hook -> final switchbacks to the goal).
-    ("Section 4", 1850.0, [
-        ("line", 150.0, "Ikaho Straight"),
-        ("arc", 55.0, 42.0, "Ikaho Zigzag"),
-        ("line", 30.0, "Ikaho Straight"),
-        ("arc", 55.0, -46.0, "Ikaho Zigzag"),
-        ("line", 120.0, "Ikaho Straight"),
-        ("arc", 120.0, 26.0, "West Gate Bend"),
-        ("line", 90.0, "Nagamine Approach"),
-        ("arc", 80.0, -38.0, "Nagamine Bend"),
-        ("line", 260.0, "Nagamine Parkside"),
-        ("arc", 95.0, -14.0, "Nagamine Park Bend"),
-        ("line", 130.0, "Nagamine Parkside"),
-        ("arc", 70.0, 58.0, "Ridge S Entry"),
-        ("line", 70.0, "Ridge S Curves"),
-        ("arc", 85.0, -44.0, "Ridge S Exit"),
-        ("line", 110.0, "West Ridge"),
-        ("arc", 65.0, 48.0, "Ridge S 2"),
-        ("line", 80.0, "West Ridge"),
-        ("arc", 65.0, -48.0, "Ridge S 2"),
-        ("arc", 130.0, -10.0, "Section 4 Exit"),
-        ("flex", 0.0, "Section 4 Exit"),
+    ("Section 1", 1742.0, [
+        ("line", 100.0, "Akina South"),
+        ("arc", 140.0, 20.0, "South Bend"),
+        ("line", 85.0, "Akina South"),
+        ("arc", 105.0, -32.0, "South S 1"),
+        ("line", 95.0, "South Climb"),
+        ("arc", 95.0, 36.0, "South S 2"),
+        ("line", 80.0, "South Climb"),
+        ("arc", 120.0, -14.0, "Ridge Approach"),
+        ("line", 70.0, "Goren Approach"),
+        ("arc", 16.0, 158.0, "Goren Hairpin 1"),
+        ("line", 30.0, "Goren Hairpins"),
+        ("arc", 16.0, -158.0, "Goren Hairpin 2"),
+        ("line", 96.0, "Goren Hairpins"),
+        ("arc", 16.0, 158.0, "Goren Hairpin 3"),
+        ("line", 30.0, "Goren Hairpins"),
+        ("arc", 16.0, -158.0, "Goren Hairpin 4"),
+        ("line", 96.0, "Goren Hairpins"),
+        ("arc", 16.0, 158.0, "Goren Hairpin 5"),
+        ("line", 34.0, "Goren Hairpins"),
+        ("arc", 38.0, -120.0, "Goren Exit Bend"),
+        ("line", 90.0, "Goren Exit"),
+        ("arc", 65.0, -95.0, "West Jog"),
+        ("line", 130.0, "West Climb"),
+        ("arc", 90.0, 55.0, "Section 1 Exit Bend"),
+        ("flex", 0.0, "Section 1 Exit"),
     ]),
-    ("Section 3", 1800.0, [
-        ("line", 120.0, "Upper Touge"),
-        ("arc", 60.0, -48.0, "Upper S 1"),
-        ("line", 60.0, "Upper Touge"),
-        ("arc", 60.0, 64.0, "Upper S 2"),
-        ("line", 90.0, "Upper Touge"),
-        ("arc", 75.0, -46.0, "Cliff Bend"),
-        ("line", 230.0, "Cliff Straight"),
-        ("arc", 45.0, 58.0, "Rock Bend"),
-        ("line", 80.0, "Mid Touge"),
-        ("arc", 90.0, -30.0, "Mid Touge Bend"),
-        ("line", 190.0, "Mid Touge"),
-        ("arc", 70.0, -42.0, "Mid Touge Bend 2"),
-        ("line", 60.0, "Mid Touge"),
-        ("arc", 55.0, -18.0, "Takane Approach Bend"),
-        ("line", 70.0, "Takane Approach"),
-        ("arc", 80.0, 36.0, "Upper Ridge Bend"),
-        ("line", 90.0, "Takane Approach"),
-        ("arc", 65.0, 34.0, "Section 3 Exit"),
-        ("flex", 0.0, "Section 3 Exit"),
-    ]),
-    ("Section 2", 1500.0, [
-        ("line", 70.0, "Takane Switchbacks"),
-        ("arc", 18.0, -160.0, "Takane Hairpin 1"),
-        ("line", 55.0, "Takane Switchbacks"),
-        ("arc", 18.0, 160.0, "Takane Hairpin 2"),
-        ("line", 55.0, "Takane Switchbacks"),
-        ("arc", 17.0, -162.0, "Takane Hairpin 3"),
-        ("line", 60.0, "Takane Switchbacks"),
-        ("arc", 19.0, 160.0, "Takane Hairpin 4"),
-        ("line", 50.0, "Takane Switchbacks"),
-        ("arc", 17.0, -160.0, "Takane Hairpin 5"),
-        ("line", 65.0, "Takane Switchbacks"),
-        ("arc", 18.0, 158.0, "Takane Hairpin 6"),
-        ("line", 150.0, "South Ridge"),
-        ("arc", 70.0, -46.0, "South Ridge Bend"),
-        ("line", 190.0, "South Ridge"),
-        ("arc", 95.0, 30.0, "Section 2 Exit"),
+    ("Section 2", 1755.0, [
+        ("line", 60.0, "Section 2 Climb"),
+        ("arc", 100.0, 78.0, "A Swing"),
+        ("line", 660.0, "Strand A"),
+        ("arc", 40.0, -172.0, "Curl"),
+        ("line", 580.0, "Strand M"),
+        ("arc", 60.0, 80.0, "Rise Bend"),
         ("flex", 0.0, "Section 2 Exit"),
     ]),
-    ("Section 1", 2100.0, [
-        ("line", 100.0, "Hook Entrance"),
-        ("arc", 175.0, -118.0, "Great Hook"),
-        ("line", 170.0, "Hook Exit Straight"),
-        ("arc", 85.0, 54.0, "Valley S 1"),
-        ("line", 80.0, "Valley Road"),
-        ("arc", 85.0, -34.0, "Valley S 2"),
-        ("line", 240.0, "Valley Road"),
-        ("arc", 22.0, 155.0, "Final Hairpin 1"),
-        ("line", 120.0, "Final Descent"),
-        ("arc", 21.0, -158.0, "Final Hairpin 2"),
-        ("line", 130.0, "Final Descent"),
-        ("arc", 24.0, 150.0, "Final Hairpin 3"),
-        ("line", 110.0, "Goal Approach"),
-        ("arc", 60.0, -52.0, "Final Corner"),
+    ("Section 3", 1954.0, [
+        ("arc", 45.0, 100.0, "B Swing"),
+        ("line", 390.0, "Strand B"),
+        ("arc", 110.0, 30.0, "B Dip"),
+        ("line", 250.0, "Strand B Low"),
+        ("arc", 50.0, -150.0, "East Curl"),
+        ("line", 150.0, "NW Climb"),
+        ("arc", 85.0, 52.0, "Climb Bend"),
+        ("arc", 60.0, 75.0, "Traverse Entry"),
+        ("line", 100.0, "Traverse"),
+        ("arc", 60.0, -75.0, "Traverse Exit"),
+        ("line", 60.0, "North Climb"),
+        ("arc", 90.0, -28.0, "Climb S"),
+        ("line", 90.0, "North Climb"),
+        ("arc", 95.0, -48.0, "Summit Traverse"),
+        ("line", 90.0, "Summit Approach"),
+        ("arc", 85.0, 70.0, "Summit Base Bend"),
+        ("flex", 0.0, "Section 3 Exit"),
+    ]),
+    ("Section 4", 2101.0, [
+        ("line", 60.0, "Summit Entry"),
+        ("arc", 17.0, 158.0, "Summit Hairpin 1"),
+        ("line", 84.0, "Summit Switchbacks"),
+        ("arc", 17.0, -160.0, "Summit Hairpin 2"),
+        ("line", 78.0, "Summit Switchbacks"),
+        ("arc", 18.0, 155.0, "Summit Hairpin 3"),
+        ("line", 64.0, "Summit Switchbacks"),
+        ("arc", 17.0, -150.0, "Summit Hairpin 4"),
+        ("line", 60.0, "Summit Top"),
+        ("arc", 80.0, 95.0, "Top Sweep"),
+        ("line", 230.0, "North Ridge"),
+        ("arc", 100.0, -25.0, "Ridge Bend"),
+        ("line", 130.0, "Final Run"),
+        ("arc", 75.0, 105.0, "Hook Entry"),
+        ("line", 230.0, "Hook Drop"),
+        ("arc", 75.0, 90.0, "Hook Turn"),
+        ("line", 190.0, "West Strand"),
+        ("arc", 75.0, 95.0, "Hook Curl"),
+        ("arc", 90.0, 80.0, "Goal Swing"),
         ("flex", 0.0, "Goal Straight"),
     ]),
 ]
 
-START_POS = (1180.0, 780.0)     # (x, z) of s = 0
-START_HEADING_DEG = 272.0       # due west, a touch north (Ikaho -> Nagamine)
-
-# Uniform enlargement (user request 2026-10-28: same layout, bigger/longer).
-# Every straight length, arc radius, section target and grade-knot position
-# is multiplied by SCALE; angles and grades are unchanged, so the shape and
-# the driving rhythm are preserved, just at 1.38x size (~10.0 km total).
-SCALE = 1.38
-
-
-def _scaled_sections():
-    out = []
-    for title, target, elements in SECTIONS:
-        els = []
-        for e in elements:
-            if e[0] == "line":
-                els.append(("line", e[1] * SCALE, e[2]))
-            elif e[0] == "arc":
-                els.append(("arc", e[1] * SCALE, e[2], e[3]))
-            else:
-                els.append(e)
-        out.append((title, target * SCALE, els))
-    return out
-
-
-SECTIONS = _scaled_sections()
+START_POS = (-1000.0, -1250.0)  # (x, z) of s = 0: bottom-left (south) end
+START_HEADING_DEG = -4.0        # just west of north up the start tail
 
 # grade knots: (s, grade) grade < 0 = downhill. Cosine-smoothed between knots.
 GRADE_KNOTS = [
-    (0.0, -0.015), (250.0, -0.040), (700.0, -0.055), (1200.0, -0.050),
-    (1850.0, -0.065), (2300.0, -0.080), (2900.0, -0.075), (3650.0, -0.085),
-    (4100.0, -0.095), (4600.0, -0.100), (5000.0, -0.090), (5150.0, -0.085),
-    (5700.0, -0.070), (6400.0, -0.085), (7250.0, -0.055),
+    (0.0, -0.015), (800.0, -0.045), (2000.0, -0.065), (3500.0, -0.085),
+    (5000.0, -0.095), (6200.0, -0.085), (7552.0, -0.060),
 ]
-
-GRADE_KNOTS = [(s * SCALE, g) for s, g in GRADE_KNOTS]
 FINISH_Y = 18.0
 
 NAMES_EXTRA = ["Akina Start", "Check Point 3", "Check Point 2", "Check Point 1", "Akina Goal"]
+
+# Check point s positions, from the red dots on the map (fractions of the
+# traced map line: ~0.218 / ~0.386 / ~0.797 of the total length).
+CHECKPOINTS = [(1629.0, "Check Point 3"), (3571.0, "Check Point 2"), (5338.0, "Check Point 1")]
 
 
 def element_length(el):
@@ -250,9 +232,7 @@ def main():
     pts, names, name_ids, section_bounds = build_points()
     total = pts[-1]["s"]
 
-    # resample at ~4 m along the dense polyline (linear in index space is fine:
-    # dense steps are uniform 0.5 m in s by construction, last step of each
-    # element may differ slightly -- acceptable, s is recomputed from x/z anyway)
+    # resample at ~4 m along the dense polyline
     target_spacing = 4.0
     count = int(round(total / target_spacing))  # segments
     samples = []
@@ -292,97 +272,28 @@ def main():
     for p, k in zip(samples, kappas):
         p["cross"] = max(-0.07, min(0.07, -k * 1.15))
 
-    # section boundary checkpoints: name the first sample of each later
-    # section as its check point for a few samples so the HUD shows it.
-    bounds = [b[0] for b in section_bounds]  # dense-s boundaries ~ section starts
-    # recompute section starts in true s by proportion (dense s == true s closely)
-    sec_start_s = [0.0, 1850.0 * SCALE, 3650.0 * SCALE, 5150.0 * SCALE]
-    cp_names = [None, "Check Point 3", "Check Point 2", "Check Point 1"]
-    for start_s, cp in zip(sec_start_s, cp_names):
-        if cp is None:
-            continue
+    # check points at the map's red-dot positions (name shown +-30 m around).
+    for cp_s, cp in CHECKPOINTS:
         for p in samples:
-            if abs(p["s"] - start_s) < 30.0:
+            if abs(p["s"] - cp_s) < 30.0:
                 p["nameId"] = name_ids[cp]
     samples[0]["nameId"] = name_ids["Akina Start"]
     for p in samples:
         if p["s"] > length - 30.0:
             p["nameId"] = name_ids["Akina Goal"]
 
-    # --- running direction reversed (user request, 2026-10-28) -----------
-    # The course is designed Ikaho -> south-west, but it is RUN south-west
-    # -> Ikaho. Reverse the samples, mirror the elevation so it stays a
-    # downhill in the running direction, flip camber signs, and fix the
-    # names that depend on travel order (start/goal, checkpoint countdown,
-    # hairpin numbering). Corner ids are renumbered in travel order.
-    import re as _re
-    _ymax = max(p["y"] for p in samples)
-    _ymin = min(p["y"] for p in samples)
-    samples.reverse()
-    for p in samples:
-        p["y"] = (_ymax + _ymin) - p["y"]
-        p["cross"] = -p["cross"]
-        p["name"] = names[p["nameId"]]
-    _cum = [0.0]
-    for a, b in zip(samples, samples[1:]):
-        _cum.append(_cum[-1] + math.hypot(b["x"] - a["x"], b["z"] - a["z"]))
-    for i, p in enumerate(samples):
-        p["s"] = _cum[i]
-        a = samples[max(0, i - 1)]
-        b = samples[min(len(samples) - 1, i + 1)]
-        p["heading"] = math.atan2(b["x"] - a["x"], b["z"] - a["z"])
-    for p in samples:
-        if p["name"] == "Akina Start":
-            p["name"] = "Akina Goal"
-        elif p["name"] == "Akina Goal":
-            p["name"] = "Akina Start"
-    _cp_seen = []
-    for p in samples:
-        if p["name"].startswith("Check Point") and p["name"] not in _cp_seen:
-            _cp_seen.append(p["name"])
-    _cp_map = {old: f"Check Point {3 - i}" for i, old in enumerate(_cp_seen)}
-    for _fam in ("Takane Hairpin", "Final Hairpin", "Nagamine Hairpin"):
-        _seen = []
-        for p in samples:
-            if _re.match(rf"^{_fam} \d+$", p["name"]) and p["name"] not in _seen:
-                _seen.append(p["name"])
-        _mp = {old: f"{_fam} {i + 1}" for i, old in enumerate(_seen)}
-        for p in samples:
-            if p["name"] in _mp:
-                p["name"] = _mp[p["name"]]
-    for p in samples:
-        if p["name"] in _cp_map:
-            p["name"] = _cp_map[p["name"]]
-    _cmap = {}
-    _nxt = 1
-    for p in samples:
-        c = p["corner"]
-        if c == 0:
-            continue
-        if c not in _cmap:
-            _cmap[c] = _nxt
-            _nxt += 1
-        p["corner"] = _cmap[c]
-    names = ["Akina Start", "Check Point 3", "Check Point 2", "Check Point 1", "Akina Goal"]
-    for p in samples:
-        if p["name"] not in names:
-            names.append(p["name"])
-    name_ids = {nm: i for i, nm in enumerate(names)}
-    for p in samples:
-        p["nameId"] = name_ids[p["name"]]
-        del p["name"]
-
     # spawn: 10 m into the course, on sample ~2-3
     spawn = samples[2]
     spawn_yaw = samples[2]["heading"]
 
     with open(out_path, "w") as f:
-        f.write("# Akina Downhill - Mt. Haruna (Harunasan) touge, after the Initial D course map\n")
-        f.write("# Point-to-point downhill: NOT a loop. Requires the 'closed 0' support in track.cpp.\n")
-        f.write("# Sections (from the route map, x1.38 scale): total ~10000 m = Sec.4 2553 m + Sec.3 2484 m + Sec.2 2070 m + Sec.1 2898 m\n")
-        f.write("# Running direction is REVERSED vs the design (user request): start at the\n")
-        f.write("# south-western end, finish at Ikaho; elevation mirrored to stay a downhill.\n")
-        f.write("# Elevation drop is a designed profile in the spirit of the pass (game physics has no slope gravity).\n")
+        f.write("# Akina Downhill - Mt. Haruna touge, after the Initial D course map (7,552 m diagram)\\n")
+        f.write("# Point-to-point downhill: NOT a loop. Requires the 'closed 0' support in track.cpp.\\n")
+        f.write("# Sections (map figures, built x1.037 to match the printed total):\\n")
+        f.write("# Sec.1 1680 m + Sec.2 1692 m + Sec.3 1884 m + Sec.4 2026 m = 7552 m.\\n")
+        f.write("# Start at the map's bottom-left (south) end, finish at the top-right;\\n")
+        f.write("# check points at the map's three red dots.\\n")
+        f.write("# Elevation drop is a designed profile in the spirit of the pass (game physics has no slope gravity).\\n")
         f.write("origin 36.471300 138.873000\n")
         f.write("title Akina Downhill\n")
         f.write("closed 0\n")

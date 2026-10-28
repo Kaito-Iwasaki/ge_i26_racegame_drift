@@ -1,33 +1,31 @@
-loaded ../assets/track/akina.txt: samples=2502 length=10003.8 closed=0 title=Akina Downhill
+loaded ../assets/track/akina.txt: samples=1889 length=7550.2 closed=0 title=Akina Downhill
 [PASS] open course (closed == 0)                            value=0.000
-[PASS] length ~10000 m                                      value=10003.781
-[PASS] sample count >= 1800                                 value=2502.000
-[PASS] sample spacing 3..5 m (min/max)                      value=4.018
+[PASS] length ~7552 m                                       value=7550.182
+[PASS] sample count >= 1800                                 value=1889.000
+[PASS] sample spacing 3..5 m (min/max)                      value=4.013
 [PASS] elevation never rises > 0.5 m per sample             value=0.000
-[PASS] total elevation drop > 500 m                         value=728.227
-[PASS] all nameId within names table                        value=54.000
+[PASS] total elevation drop > 500 m                         value=543.410
+[PASS] all nameId within names table                        value=65.000
 [PASS] corner count >= 30                                   value=34.000
-[PASS] |cross slope| <= 0.07                                value=0.049
+[PASS] |cross slope| <= 0.07                                value=0.062
 [PASS] spawn is on the road                                 value=0.000
-[PASS] goal sample s ~ length                               value=10003.781
-max curvature 0.0427 1/m (min radius 23.4 m)
-[PASS] tightest radius >= ~13 m                             value=23.430
-self-test autopilot: travelled 1890 m, maxLat 6.6 m
+[PASS] goal sample s ~ length                               value=7550.182
+max curvature 0.0627 1/m (min radius 16.0 m)
+[PASS] tightest radius >= ~13 m                             value=15.957
+self-test autopilot: travelled 945 m, maxLat 8.5 m
 [PASS] self-test autopilot: finite state                    value=1.000
-[PASS] self-test autopilot: travelled >= 1200 m             value=1889.930
-[PASS] self-test autopilot: stays near course               value=6.604
-  ... s=1000 m at 25 s (145 km/h)
-  ... s=2000 m at 51 s (179 km/h)
-  ... s=3001 m at 69 s (202 km/h)
-  ... s=4000 m at 88 s (119 km/h)
-  ... s=5001 m at 127 s (199 km/h)
-  ... s=6000 m at 147 s (167 km/h)
-  ... s=7001 m at 168 s (157 km/h)
-  ... s=8001 m at 188 s (161 km/h)
-  ... s=9000 m at 208 s (201 km/h)
-full run: reached s=10000 / 10004 m in 227.8 s
+[PASS] self-test autopilot: travelled >= 900 m              value=945.493
+[PASS] self-test autopilot: stays near course               value=8.462
+  ... s=1000 m at 36 s (71 km/h)
+  ... s=2001 m at 62 s (194 km/h)
+  ... s=3001 m at 84 s (201 km/h)
+  ... s=4001 m at 106 s (180 km/h)
+  ... s=5001 m at 131 s (173 km/h)
+  ... s=6000 m at 167 s (155 km/h)
+  ... s=7000 m at 189 s (150 km/h)
+full run: reached s=7547 / 7550 m in 200.9 s
 [PASS] full run: finite state                               value=1.000
-[PASS] full run: reached the goal                           value=9999.782
-[PASS] full run: within 15 min                              value=227.788
+[PASS] full run: reached the goal                           value=7546.764
+[PASS] full run: within 15 min                              value=200.895
 
 ALL PASS
