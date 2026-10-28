@@ -92,7 +92,7 @@ int main(int argc, char** argv) {
                 path, n, track.length, track.closed ? 1 : 0, track.title.c_str());
 
     check(!track.closed, "open course (closed == 0)", track.closed ? 1 : 0);
-    check(track.length > 7000.0f && track.length < 8100.0f, "length ~7552 m", track.length);
+    check(track.length > 9500.0f && track.length < 10500.0f, "length ~10000 m", track.length);
     check(n >= 1800, "sample count >= 1800", float(n));
 
     float minGap = 1e9f, maxGap = 0;

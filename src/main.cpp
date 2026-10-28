@@ -335,51 +335,92 @@ void updateCamera(App& app, float dt) {
 }
 
 void drawMinimap(App& app) {
+    // 自車中心のズーム表示（全体図だと峠のヘアピンが潰れて読めないため）。
+    // 北が上、表示範囲は約 640 m 四方。全体の進行度は下のバーで示す。
     float size = 190.0f;
     float x0 = 24.0f;
-    float y0 = float(app.renderer.height) - size - 28.0f;
-    app.renderer.addQuad(x0, y0, x0 + size, y0 + size, 0.02f, 0.03f, 0.05f, 0.78f);
-    float minX = app.track.samples[0].x;
-    float maxX = minX;
-    float minZ = app.track.samples[0].z;
-    float maxZ = minZ;
-    for (const TrackSample& sample : app.track.samples) {
-        minX = std::min(minX, sample.x);
-        maxX = std::max(maxX, sample.x);
-        minZ = std::min(minZ, sample.z);
-        maxZ = std::max(maxZ, sample.z);
-    }
-    float midX = (minX + maxX) * 0.5f;
-    float midZ = (minZ + maxZ) * 0.5f;
-    float span = std::max(maxX - minX, maxZ - minZ) * 1.12f;
-    auto mapX = [&](float x) { return x0 + size * 0.5f + (x - midX) / span * (size - 18.0f); };
-    auto mapY = [&](float z) { return y0 + size * 0.5f - (z - midZ) / span * (size - 18.0f); };
+    // 下の操作ヘルプ（height-78 / -54 の2行）と重ならないよう、その上に置く。
+    float y0 = float(app.renderer.height) - size - 118.0f;
+    app.renderer.addQuad(x0 - 2, y0 - 2, x0 + size + 2, y0 + size + 2, 0.55f, 0.58f, 0.62f, 0.9f);
+    app.renderer.addQuad(x0, y0, x0 + size, y0 + size, 0.02f, 0.03f, 0.05f, 0.82f);
+    const float span = 640.0f;  // 表示する一辺の長さ (m)
+    const float px = size / span;
+    auto mapX = [&](float x) { return x0 + size * 0.5f + (x - app.car.x) * px; };
+    auto mapY = [&](float z) { return y0 + size * 0.5f - (z - app.car.z) * px; };
+    // 線分をミニマップの枠でクリップして描く (Liang-Barsky)。
+    auto drawClipped = [&](float ax, float ay, float bx, float by, float r, float g, float b) {
+        float dx = bx - ax, dy = by - ay;
+        float t0 = 0.0f, t1 = 1.0f;
+        const float p[4] = {-dx, dx, -dy, dy};
+        const float q[4] = {ax - x0, x0 + size - ax, ay - y0, y0 + size - ay};
+        for (int i = 0; i < 4; ++i) {
+            if (p[i] == 0.0f) {
+                if (q[i] < 0.0f) return;
+            } else {
+                float t = q[i] / p[i];
+                if (p[i] < 0.0f) { if (t > t1) return; if (t > t0) t0 = t; }
+                else { if (t < t0) return; if (t < t1) t1 = t; }
+            }
+        }
+        app.renderer.drawLine(ax + dx * t0, ay + dy * t0, ax + dx * t1, ay + dy * t1,
+                              2.5f, r, g, b, 1);
+    };
     const int n = static_cast<int>(app.track.samples.size());
     const int segs = app.track.closed ? n : n - 1;
+    const float viewR = span * 0.75f;
     for (int i = 0; i < segs; ++i) {
         const TrackSample& a = app.track.samples[i];
         const TrackSample& b = app.track.samples[(i + 1) % n];
-        float r = 0.75f, g = 0.78f, bl = 0.82f;
+        if (std::fabs(a.x - app.car.x) > viewR && std::fabs(b.x - app.car.x) > viewR) continue;
+        if (std::fabs(a.z - app.car.z) > viewR && std::fabs(b.z - app.car.z) > viewR) continue;
+        float r = 0.80f, g = 0.83f, bl = 0.87f;
         if (a.bridge || b.bridge) {
-            r = 0.95f;
-            g = 0.72f;
-            bl = 0.28f;
+            r = 0.95f; g = 0.72f; bl = 0.28f;
         }
-        app.renderer.drawLine(mapX(a.x), mapY(a.z), mapX(b.x), mapY(b.z), 2.0f, r, g, bl, 1);
+        drawClipped(mapX(a.x), mapY(a.z), mapX(b.x), mapY(b.z), r, g, bl);
     }
-    float mx = mapX(app.car.x);
-    float my = mapY(app.car.z);
+    // スタート（緑）とゴール（赤）のマーカー（表示範囲内なら）。
+    auto marker = [&](float wx, float wz, float r, float g, float b) {
+        float mx = mapX(wx), my = mapY(wz);
+        if (mx < x0 || mx > x0 + size || my < y0 || my > y0 + size) return;
+        app.renderer.addQuad(mx - 4, my - 4, mx + 4, my + 4, r, g, b, 1);
+    };
+    if (n > 0) {
+        marker(app.track.samples[0].x, app.track.samples[0].z, 0.25f, 0.85f, 0.35f);
+        marker(app.track.samples[n - 1].x, app.track.samples[n - 1].z, 0.90f, 0.25f, 0.20f);
+    }
+    // 自車マーカー（赤い三角、従来より少し大きめ）。
+    float mx = x0 + size * 0.5f;
+    float my = y0 + size * 0.5f;
     Vec3 nose{std::sin(app.car.yaw), 0, std::cos(app.car.yaw)};
     Vec3 side{std::cos(app.car.yaw), 0, -std::sin(app.car.yaw)};
-    float nx = mx + nose.x * 9.0f;
-    float ny = my - nose.z * 9.0f;
-    float lx = mx - nose.x * 5.0f + side.x * 5.0f;
-    float ly = my + nose.z * 5.0f - side.z * 5.0f;
-    float rx = mx - nose.x * 5.0f - side.x * 5.0f;
-    float ry = my + nose.z * 5.0f + side.z * 5.0f;
-    app.renderer.drawLine(lx, ly, nx, ny, 2.0f, 0.9f, 0.2f, 0.18f, 1);
-    app.renderer.drawLine(rx, ry, nx, ny, 2.0f, 0.9f, 0.2f, 0.18f, 1);
-    app.renderer.drawLine(lx, ly, rx, ry, 2.0f, 0.9f, 0.2f, 0.18f, 1);
+    float nx = mx + nose.x * 11.0f;
+    float ny = my - nose.z * 11.0f;
+    float lx = mx - nose.x * 6.0f + side.x * 6.0f;
+    float ly = my + nose.z * 6.0f - side.z * 6.0f;
+    float rx = mx - nose.x * 6.0f - side.x * 6.0f;
+    float ry = my + nose.z * 6.0f + side.z * 6.0f;
+    app.renderer.drawLine(lx, ly, nx, ny, 2.5f, 0.95f, 0.25f, 0.20f, 1);
+    app.renderer.drawLine(rx, ry, nx, ny, 2.5f, 0.95f, 0.25f, 0.20f, 1);
+    app.renderer.drawLine(lx, ly, rx, ry, 2.5f, 0.95f, 0.25f, 0.20f, 1);
+    // 北の印。
+    app.renderer.drawText(x0 + size - 16, y0 + 4, 1.6f, "N", 0.9f, 0.9f, 0.9f, 1);
+    // 全体の進行度バー（ミニマップの下）: チェックポイントに目盛り。
+    float barY = y0 + size + 6.0f;
+    app.renderer.addQuad(x0, barY, x0 + size, barY + 7.0f, 0.10f, 0.11f, 0.13f, 0.85f);
+    float frac = app.track.length > 0.0f ? app.car.ground.s / app.track.length : 0.0f;
+    if (frac < 0.0f) frac = 0.0f;
+    if (frac > 1.0f) frac = 1.0f;
+    app.renderer.addQuad(x0, barY, x0 + size * frac, barY + 7.0f, 0.30f, 0.75f, 0.95f, 0.95f);
+    for (int i = 0; i < n; ++i) {
+        const TrackSample& smp = app.track.samples[i];
+        if (smp.nameId < 0 || smp.nameId >= static_cast<int>(app.track.names.size())) continue;
+        const std::string& nm = app.track.names[smp.nameId];
+        if (nm.rfind("Check Point", 0) != 0) continue;
+        if (i > 0 && app.track.samples[i - 1].nameId == smp.nameId) continue;
+        float tx = x0 + size * (smp.s / app.track.length);
+        app.renderer.addQuad(tx - 1, barY - 2.0f, tx + 1, barY + 9.0f, 0.9f, 0.9f, 0.9f, 0.9f);
+    }
 }
 
 void drawHud(App& app) {

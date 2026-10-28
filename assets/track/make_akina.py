@@ -6,7 +6,7 @@ Produces akina.txt in exactly the same format as suzuka.txt:
   header keys (origin / half_width / curb_width / length / spawn / names / samples)
   sample rows:  x z y cross bridge corner nameId
 
-The course is an OPEN downhill (point-to-point), ~7,500 m, laid out
+The course is an OPEN downhill (point-to-point), ~10,000 m, laid out
 after the real Akina (Mt. Haruna) route map the user supplied:
 Ikaho start -> west along the ridge past Nagamine -> the Takane
 switchback cluster -> a long southern hook -> final hairpins.
@@ -111,6 +111,30 @@ SECTIONS = [
 START_POS = (1180.0, 780.0)     # (x, z) of s = 0
 START_HEADING_DEG = 272.0       # due west, a touch north (Ikaho -> Nagamine)
 
+# Uniform enlargement (user request 2026-10-28: same layout, bigger/longer).
+# Every straight length, arc radius, section target and grade-knot position
+# is multiplied by SCALE; angles and grades are unchanged, so the shape and
+# the driving rhythm are preserved, just at 1.38x size (~10.0 km total).
+SCALE = 1.38
+
+
+def _scaled_sections():
+    out = []
+    for title, target, elements in SECTIONS:
+        els = []
+        for e in elements:
+            if e[0] == "line":
+                els.append(("line", e[1] * SCALE, e[2]))
+            elif e[0] == "arc":
+                els.append(("arc", e[1] * SCALE, e[2], e[3]))
+            else:
+                els.append(e)
+        out.append((title, target * SCALE, els))
+    return out
+
+
+SECTIONS = _scaled_sections()
+
 # grade knots: (s, grade) grade < 0 = downhill. Cosine-smoothed between knots.
 GRADE_KNOTS = [
     (0.0, -0.015), (250.0, -0.040), (700.0, -0.055), (1200.0, -0.050),
@@ -118,6 +142,8 @@ GRADE_KNOTS = [
     (4100.0, -0.095), (4600.0, -0.100), (5000.0, -0.090), (5150.0, -0.085),
     (5700.0, -0.070), (6400.0, -0.085), (7250.0, -0.055),
 ]
+
+GRADE_KNOTS = [(s * SCALE, g) for s, g in GRADE_KNOTS]
 FINISH_Y = 18.0
 
 NAMES_EXTRA = ["Akina Start", "Check Point 3", "Check Point 2", "Check Point 1", "Akina Goal"]
@@ -270,7 +296,7 @@ def main():
     # section as its check point for a few samples so the HUD shows it.
     bounds = [b[0] for b in section_bounds]  # dense-s boundaries ~ section starts
     # recompute section starts in true s by proportion (dense s == true s closely)
-    sec_start_s = [0.0, 1850.0, 3650.0, 5150.0]
+    sec_start_s = [0.0, 1850.0 * SCALE, 3650.0 * SCALE, 5150.0 * SCALE]
     cp_names = [None, "Check Point 3", "Check Point 2", "Check Point 1"]
     for start_s, cp in zip(sec_start_s, cp_names):
         if cp is None:
@@ -353,7 +379,7 @@ def main():
     with open(out_path, "w") as f:
         f.write("# Akina Downhill - Mt. Haruna (Harunasan) touge, after the Initial D course map\n")
         f.write("# Point-to-point downhill: NOT a loop. Requires the 'closed 0' support in track.cpp.\n")
-        f.write("# Sections (from the route map): total ~7250 m = Sec.4 1850 m + Sec.3 1800 m + Sec.2 1500 m + Sec.1 2100 m\n")
+        f.write("# Sections (from the route map, x1.38 scale): total ~10000 m = Sec.4 2553 m + Sec.3 2484 m + Sec.2 2070 m + Sec.1 2898 m\n")
         f.write("# Running direction is REVERSED vs the design (user request): start at the\n")
         f.write("# south-western end, finish at Ikaho; elevation mirrored to stay a downhill.\n")
         f.write("# Elevation drop is a designed profile in the spirit of the pass (game physics has no slope gravity).\n")
