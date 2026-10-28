@@ -164,15 +164,16 @@
   カメラも速度で視野角が 60° → 最大 69° まで広がるようにして流れを強調した
   （`main.cpp` の投影行列）。音側のギア最終段も 88 に合わせてある。
 
-## 検証（tests/drift_test.cpp）
+## 検証（src/drift_test.cpp）
 
 SDL/OpenGL を使わず、円形コースをプログラムで組み立てて物理だけを検証する
 ハーネスを付けました。この環境には SDL と鈴鹿のコースデータが無いため、本編の
 `--self-test` はここでは実行できていません（`main.cpp` はスタブヘッダで構文チェック済み）。
 
 ```sh
-g++ -std=c++17 -I. tests/drift_test.cpp car.cpp track.cpp -o drift_test
-./drift_test   # 48項目、全て PASS（tests/test_results.txt に記録）
+cd src
+g++ -std=c++17 -I. drift_test.cpp car.cpp track.cpp -o drift_test
+./drift_test   # 48項目、全て PASS（test_results.txt に記録）
 ```
 
 主な実測値:
@@ -257,7 +258,7 @@ g++ -std=c++17 -I. tests/drift_test.cpp car.cpp track.cpp -o drift_test
 （ホイールスピン）。試聴サンプルでは回転数の 1 ブロックあたりの変化は最大 0.021 で、
 跳ねは無くなっています。
 
-検証は `tests/sound_test.cpp`（47項目、全て PASS、`tests/sound_test_results.txt`）。
+検証は `src/sound_test.cpp`（47項目、全て PASS、`src/sound_test_results.txt`）。
 波形の性質を数値で見ています：回転数でゼロクロス数が 2.7 倍（ピッチ追従）、
 アイドルの音量うねり（5msブロックRMSの変動係数）0.52、高回転ではその 1/1.8 に均される、
 ブレーキ鳴き単体で RMS 0.096・ゼロクロス 5520/s（≒2760 Hz）、
@@ -284,7 +285,7 @@ g++ -std=c++17 -I. tests/drift_test.cpp car.cpp track.cpp -o drift_test
 - `main.cpp`: ドリフト中に後輪位置から発生させ、フレーム単位で更新・描画。
   リセットで煙も消えます。ポーズ中は凍結します。
 
-検証は `tests/smoke_test.cpp`（11項目、全て PASS、`tests/smoke_test_results.txt`）。
+検証は `src/smoke_test.cpp`（11項目、全て PASS、`src/smoke_test_results.txt`）。
 この環境では実機の見た目を確認できないため、粒の発生・寿命・上限・頂点化の
 数値検証と、`main.cpp` / `render.cpp` の構文チェックまで行っています。
 
@@ -317,7 +318,7 @@ g++ -std=c++17 -I. tests/drift_test.cpp car.cpp track.cpp -o drift_test
   コース追加・差し替え後はリビルド＋ブラウザのハードリロードが必要です。
 - 生成: `assets/track/make_akina.py` がコース生成スクリプト
   （直線＋円弧の設計を 4 m 間隔にリサンプル、標高とバンク角を付与）。
-- 検証: `tests/akina_test.cpp`（全項目 PASS、`tests/akina_test_results.txt`）。
+- 検証: `src/akina_test.cpp`（全項目 PASS、`src/akina_test_results.txt`）。
   本編 self-test 相当のオートパイロットで 50 秒 1,321 m 走行、
   曲率ベース速度制御のオートパイロットでは全区間を 201.5 秒で完走。
   鈴鹿のロードと self-test 相当走行も回帰 PASS を確認済み。
