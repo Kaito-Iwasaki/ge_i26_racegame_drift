@@ -32,6 +32,10 @@ add_executable(racegame
 )
 
 set(ASSETS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets")
+# assets の中身（コースや音声）を列挙しておく。ブラウザ版ではこれを
+# リンク依存にして、assets だけ変わったときも再リンク（= preload の
+# やり直し）が走るようにする。
+file(GLOB_RECURSE ASSET_FILES CONFIGURE_DEPENDS "${ASSETS_DIR}/*")
 
 if(EMSCRIPTEN)
     message(STATUS "TARGET_PLATFORM=Browser (Emscripten)")
@@ -88,6 +92,10 @@ if(EMSCRIPTEN)
     )
 
     set_target_properties(racegame PROPERTIES SUFFIX ".html")
+    # --preload-file はリンク時に assets を埋め込むため、ソースが
+    # 変わらない限り再リンクされず、コースや音声だけ差し替えても
+    # 古いまま残る（「変わらない」の原因）。assets をリンク依存にする。
+    set_target_properties(racegame PROPERTIES LINK_DEPENDS "${ASSET_FILES}")
 
 else()
     message(STATUS "TARGET_PLATFORM=Native (${CMAKE_SYSTEM_NAME})")
@@ -108,11 +116,17 @@ else()
         $<$<CONFIG:Release>:-O2>
     )
 
-    add_custom_command(TARGET racegame POST_BUILD
+    # 以前は POST_BUILD でコピーしていたが、それだとソースが変わって
+    # 再リンクされたときにしかコピーが走らず、コースや音声だけ
+    # 差し替えても exe の隣の assets/ が古いまま残った
+    # （「コースが変わらない」「音が変わらない」の原因）。
+    # ビルドのたびに必ず走る専用ターゲットでコピーする。
+    add_custom_target(copy_assets ALL
         COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${ASSETS_DIR}" "$<TARGET_FILE_DIR:racegame>/assets"
         COMMENT "assets/ を実行ファイルの隣にコピー"
     )
+    add_dependencies(racegame copy_assets)
 
     install(TARGETS racegame DESTINATION .)
     install(DIRECTORY "${ASSETS_DIR}" DESTINATION .)
