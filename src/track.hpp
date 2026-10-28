@@ -30,7 +30,10 @@ struct TrackSample {
     bool bridge = false;
 };
 
-// 鈴鹿サーキット。中心線は OSM、高さは国土地理院の標高。
+// サーキット（周回）と、秋名のような一方向コース（オープン）の両対応。
+// ファイルに `closed 0` と書くとオープン扱いになり、最後のサンプルが
+// ゴールになる（始点へは繋がない）。省略時は従来通り周回。
+// `title <text>` はウィンドウタイトル用のコース名。
 struct Track {
     float originLat = 0;
     float originLon = 0;
@@ -38,6 +41,8 @@ struct Track {
     float curbWidth = 0.8f;
     float runoff = 8.0f;
     float length = 0;
+    bool closed = true;
+    std::string title;
     float spawnX = 0;
     float spawnY = 0;
     float spawnZ = 0;

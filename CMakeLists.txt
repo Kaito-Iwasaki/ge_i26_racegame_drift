@@ -28,6 +28,7 @@ add_executable(racegame
     src/track.cpp
     src/car.cpp
     src/render.cpp
+    src/sound.cpp
 )
 
 set(ASSETS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets")
@@ -35,12 +36,12 @@ set(ASSETS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets")
 if(EMSCRIPTEN)
     message(STATUS "TARGET_PLATFORM=Browser (Emscripten)")
 
+    # 音は sound.cpp が SDL のオーディオデバイスへ直接合成して出すので、
+    # SDL_mixer は不要（以前は初期化だけで何も鳴らしていなかった）。
     set(EMSCRIPTEN_SDL_FLAGS
         "-sUSE_SDL=2"
         "-sUSE_SDL_IMAGE=2"
         "-sSDL2_IMAGE_FORMATS=['png']"
-        "-sUSE_SDL_MIXER=2"
-        "-sSDL2_MIXER_FORMATS=['ogg']"
     )
 
     set(DEBUG_INFO_FORMAT "DWARF" CACHE STRING "Debug info format for Debug builds (DWARF or SOURCE_MAP)")
@@ -95,12 +96,11 @@ else()
     find_package(OpenGL REQUIRED)
     pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
     pkg_check_modules(SDL2_IMAGE REQUIRED IMPORTED_TARGET SDL2_image)
-    pkg_check_modules(SDL2_MIXER REQUIRED IMPORTED_TARGET SDL2_mixer)
+    # SDL_mixer は不要（音は sound.cpp が SDL 本体のオーディオ機能で合成する）。
 
     target_link_libraries(racegame PRIVATE
         PkgConfig::SDL2
         PkgConfig::SDL2_IMAGE
-        PkgConfig::SDL2_MIXER
         OpenGL::GL
     )
 

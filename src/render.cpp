@@ -80,6 +80,34 @@ void main() {
 }
 )GLSL";
 
+const char* kSmokeVs = R"GLSL(
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec2 aUv;
+layout(location = 2) in float aAlpha;
+uniform mat4 uViewProj;
+out vec2 vUv;
+out float vAlpha;
+void main() {
+    vUv = aUv;
+    vAlpha = aAlpha;
+    gl_Position = uViewProj * vec4(aPos, 1.0);
+}
+)GLSL";
+
+const char* kSmokeFs = R"GLSL(
+in vec2 vUv;
+in float vAlpha;
+out vec4 fragColor;
+void main() {
+    // 中心からの距離で円形に柔らかく落とす（煙の粒の見た目）。
+    float d = length(vUv - vec2(0.5)) * 2.0;
+    float fall = smoothstep(1.0, 0.2, d);
+    fall *= fall;
+    vec3 color = vec3(0.90, 0.90, 0.92);
+    fragColor = vec4(color, vAlpha * fall);
+}
+)GLSL";
+
 const char* kHudVs = R"GLSL(
 layout(location = 0) in vec2 aPos;
 layout(location = 1) in vec4 aColor;
@@ -183,13 +211,15 @@ bool Renderer::init() {
     worldProgram = linkProgram(kWorldVs, kWorldFs);
     skyProgram = linkProgram(kSkyVs, kSkyFs);
     hudProgram = linkProgram(kHudVs, kHudFs);
-    if (!worldProgram || !skyProgram || !hudProgram) {
+    smokeProgram = linkProgram(kSmokeVs, kSmokeFs);
+    if (!worldProgram || !skyProgram || !hudProgram || !smokeProgram) {
         return false;
     }
     uViewProj = glGetUniformLocation(worldProgram, "uViewProj");
     uModel = glGetUniformLocation(worldProgram, "uModel");
     uCamPos = glGetUniformLocation(worldProgram, "uCamPos");
     uOrtho = glGetUniformLocation(hudProgram, "uOrtho");
+    uSmokeViewProj = glGetUniformLocation(smokeProgram, "uViewProj");
 
     glGenVertexArrays(1, &hudVao);
     glGenBuffers(1, &hudVbo);
@@ -201,6 +231,19 @@ bool Renderer::init() {
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), reinterpret_cast<void*>(0));
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 6 * sizeof(float), reinterpret_cast<void*>(2 * sizeof(float)));
+
+    glGenVertexArrays(1, &smokeVao);
+    glGenBuffers(1, &smokeVbo);
+    glGenBuffers(1, &smokeIbo);
+    glBindVertexArray(smokeVao);
+    glBindBuffer(GL_ARRAY_BUFFER, smokeVbo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, smokeIbo);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), reinterpret_cast<void*>(0));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), reinterpret_cast<void*>(3 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 6 * sizeof(float), reinterpret_cast<void*>(5 * sizeof(float)));
     glBindVertexArray(dummyVao);
 
     glEnable(GL_DEPTH_TEST);
@@ -247,6 +290,31 @@ void Renderer::draw(const GpuMesh& mesh, const Mat4& model) {
     glBindVertexArray(mesh.vao);
     glUniformMatrix4fv(uModel, 1, GL_FALSE, model.m);
     glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, nullptr);
+}
+
+void Renderer::drawSmoke(const float* verts, int vertCount, const unsigned* indices,
+                         int indexCount, const Mat4& viewProj) {
+    if (indexCount <= 0 || vertCount <= 0 || !smokeProgram) {
+        return;
+    }
+    // 半透明：色は重ねて描き、深度は読むだけ（書き込まない）ので煙同士や
+    // 車体と自然に重なる。不透明物の後に呼ぶこと。
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+    glUseProgram(smokeProgram);
+    glUniformMatrix4fv(uSmokeViewProj, 1, GL_FALSE, viewProj.m);
+    glBindVertexArray(smokeVao);
+    glBindBuffer(GL_ARRAY_BUFFER, smokeVbo);
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertCount) * 6 * sizeof(float), verts,
+                 GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, smokeIbo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(indexCount) * sizeof(unsigned),
+                 indices, GL_DYNAMIC_DRAW);
+    glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, nullptr);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+    glBindVertexArray(dummyVao);
 }
 
 void Renderer::beginHud() {
