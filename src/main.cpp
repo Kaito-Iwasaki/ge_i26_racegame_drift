@@ -66,6 +66,7 @@ struct App {
     bool showHelp = true;
     double accumulator = 0;
     Uint64 prevCounter = 0;
+    float fps = 0;  // 表示用 FPS（フレーム間隔の指数移動平均）
 };
 
 // コースの選択: 引数に `akina` / `suzuka`、または .txt のパスを渡せる。
@@ -433,6 +434,8 @@ void drawHud(App& app) {
     if (app.camera.mode == 1) camName = "CLOSE";
     if (app.camera.mode == 2) camName = "FAR";
     hud.drawText(float(hud.width) - 140, 22, 2.0f, camName, 0.8f, 0.84f, 0.88f, 1);
+    std::snprintf(line, sizeof(line), "%d FPS", static_cast<int>(std::lround(app.fps)));
+    hud.drawText(float(hud.width) - 140, 52, 2.0f, line, 0.8f, 0.84f, 0.88f, 1);
 
     if (app.showHelp) {
         hud.drawText(24, float(hud.height) - 78, 1.7f,
@@ -502,6 +505,10 @@ void frame(void* userdata) {
     Uint64 now = SDL_GetPerformanceCounter();
     double elapsed = double(now - app.prevCounter) / double(SDL_GetPerformanceFrequency());
     app.prevCounter = now;
+    if (elapsed > 0.0001) {
+        float inst = static_cast<float>(1.0 / elapsed);
+        app.fps = (app.fps <= 0) ? inst : app.fps + (inst - app.fps) * 0.05f;
+    }
     if (elapsed > kMaxFrameSec) elapsed = kMaxFrameSec;
     if (elapsed < 0) elapsed = 0;
 

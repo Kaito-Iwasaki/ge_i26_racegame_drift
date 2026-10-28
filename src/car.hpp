@@ -42,7 +42,7 @@ struct Car {
     float slipEntryHold = 0;  // スリップ角が突入しきい値を超え続けている時間（瞬間の跳ねでは入らない）
     float postureHold = 0;  // 無ステア＋アクセル時の姿勢ホールドの強さ 0..1（滑らかに出入りする）
     float settledHold = 0;  // 滑り・ヨーとも小さい状態が続いている時間（明らかにグリップしている判定）
-    float gripRestore = 0;  // ドリフト終了直後の物理量クロスフェード 1→0（約0.9秒で通常へ戻す）
+    float gripRestore = 0;  // ドリフト終了直後の物理量クロスフェード 1→0（約1.4秒で通常へ戻す）
 
     void reset(const Track& track);
     void update(float dt, const DriveInput& input, const Track& track);

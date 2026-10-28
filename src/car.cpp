@@ -31,7 +31,7 @@ constexpr float kYawResponseGrip = 15.5f;   // ヨーレートが目標へ追従
 constexpr float kYawResponseDrift = 12.5f;  // ドリフト中もステアで向きを動かせる追従
 constexpr float kDriftEnterSlip = 0.16f;    // ドリフト開始のスリップ角 (rad, 約9°)
 constexpr float kDriftExitSlip = 0.12f;     // ここまで滑りが収まったらグリップへ戻れる (rad)
-constexpr float kDriftRecoverBase = 0.11f;  // 何もしなくても溜まる回復の速さ (/s)。とてもゆっくり
+constexpr float kDriftRecoverBase = 0.075f;  // 何もしなくても溜まる回復の速さ (/s)。とてもゆっくり
 constexpr float kDriftRecoverCounter = 1.7f;  // カウンターステア時の上乗せ (/s)
 constexpr float kDriftRecoverDeep = 0.45f;    // 深い滑りでのカウンターの上乗せ (/s)
 constexpr float kDriftDeepSlip = 0.25f;     // これより深い滑りではカウンターはバランス取り扱い
@@ -199,14 +199,16 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
     }
 
     // ドリフト終了直後は、横グリップの上限をドリフト側から通常へ
-    // 約0.9秒かけて滑らかに戻す（クロスフェード）。状態が切り替わった
+    // 約1.4秒かけて滑らかに戻す（クロスフェード、序盤は緩やかな
+    // イーズイン）。状態が切り替わった
     // 瞬間にグリップが跳ね上がると、残っていた横滑りが一気に消えて
     // 進行方向が「ガクッ」と跳ぶため。特に、失速して速度の下限で
     // 終了したときは滑りが深いまま残っているので効きが大きい。
     if (!drifting && gripRestore > 0.0f) {
-        float cap = kGripDrift + (kGripAsphalt - kGripDrift) * (1.0f - gripRestore);
+        float fade = 1.0f - gripRestore;
+        float cap = kGripDrift + (kGripAsphalt - kGripDrift) * fade * fade;
         if (gripTarget > cap) gripTarget = cap;
-        gripRestore = std::max(0.0f, gripRestore - dt / 0.9f);
+        gripRestore = std::max(0.0f, gripRestore - dt / 1.4f);
     }
 
     // グリップは落とすとき素早く、戻すとき少し遅く。戻しを即座にすると
@@ -239,8 +241,14 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
     //   3. 滑りを消す向きの減衰（横グリップと向き寄せ）を弱める
     // ステアを入れるかアクセルを離せば即座に通常へ戻る。
     {
-        bool wantHold = drifting && std::fabs(input.steer) < 0.08f && input.throttle > 0.35f;
-        postureHold = approachExp(postureHold, wantHold ? 1.0f : 0.0f, 6.0f, dt);
+        bool holdActive = drifting && std::fabs(input.steer) < 0.08f && input.throttle > 0.35f;
+        // ホールドは「保つべき姿勢（滑り）」があるときだけ効かせる。滑りが
+        // 小さいのに効かせると、減衰を止める作用のせいで小さな残留スリップが
+        // 消えず、まっすぐ走っているのにドリフト状態が解けない。滑り
+        // 0.10 rad 以下では無効、0.25 rad 以上でフルに効く。
+        float holdTarget = holdActive
+            ? clampf((std::fabs(slipNow) - 0.10f) / 0.15f, 0.0f, 1.0f) : 0.0f;
+        postureHold = approachExp(postureHold, holdTarget, 6.0f, dt);
     }
     if (drifting && postureHold > 0.0f) {
         yawTarget += -0.50f * std::tanh(slipNow / 0.40f) * postureHold;
@@ -298,8 +306,8 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
     // アクセルで姿勢を保ちながら速度も乗せ続けられるバランスにする。
     const float slipAbs = std::fabs(std::atan2(vL, std::fabs(vF) + 0.001f));
     if (speedNow > 1.0f) {
-        float scrubRate = drifting ? 0.09f : (0.55f - 0.46f * gripRestore);
-        float scrubGain = drifting ? 0.04f : (0.35f - 0.31f * gripRestore);
+        float scrubRate = drifting ? 0.07f : (0.55f - 0.48f * gripRestore);
+        float scrubGain = drifting ? 0.03f : (0.35f - 0.32f * gripRestore);
         const float scrub = 1.0f - std::exp(-scrubRate * slipAbs * dt * 4.0f);
         vF -= vF * scrub * scrubGain;
     }
@@ -332,7 +340,7 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
     // ドリフト判定が残るのを防ぐため（切り返しの途中はヨーが大きい
     // ので、ここでは終了しない）。
     if (drifting) {
-        if (std::fabs(slipAngle) < 0.055f && std::fabs(yawRate) < 0.30f) {
+        if (std::fabs(slipAngle) < 0.07f && std::fabs(yawRate) < 0.30f) {
             settledHold += dt;
             if (settledHold > 0.35f) {
                 drifting = false;
@@ -380,7 +388,7 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
             driftRecovery = 0.6f;  // 深い滑りの最中は満ち切らない
         }
         if ((driftRecovery >= 1.0f && std::fabs(slipAngle) < kDriftExitSlip) ||
-            speedNow < 3.5f) {
+            speedNow < 2.5f) {
             drifting = false;
             driftRecovery = 0.0f;
             gripRestore = 1.0f;  // 物理量はクロスフェードで戻す（下記）

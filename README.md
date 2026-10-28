@@ -28,7 +28,7 @@ Cursor または VS Code でこのフォルダを開き、**Reopen in Container*
 | ポーズ | P | Start（Menu / Options） |
 | 操作表示 | H | |
 
-画面は追従、近め、遠めの 3 つです。ギアはオートマです。
+画面は追従、近め、遠めの 3 つです。ギアはオートマです。HUD 右上に FPS も表示します。
 
 ## ドリフト
 
