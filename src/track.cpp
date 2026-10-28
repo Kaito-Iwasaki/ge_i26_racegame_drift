@@ -7,10 +7,32 @@
 
 namespace {
 
-Vec3 horizontalRight(const Track& track, int index) {
+// オープンコースでは端の向こうを巻き戻さず、端点でクランプする。
+int prevIndex(const Track& track, int index) {
     const int n = static_cast<int>(track.samples.size());
-    const TrackSample& prev = track.samples[(index + n - 1) % n];
-    const TrackSample& next = track.samples[(index + 1) % n];
+    if (track.closed) {
+        return (index + n - 1) % n;
+    }
+    return index > 0 ? index - 1 : 0;
+}
+
+int nextIndex(const Track& track, int index) {
+    const int n = static_cast<int>(track.samples.size());
+    if (track.closed) {
+        return (index + 1) % n;
+    }
+    return index + 1 < n ? index + 1 : n - 1;
+}
+
+// 実際に描く／判定する区間の数。周回は n 本、オープンは n-1 本。
+int segmentCount(const Track& track) {
+    const int n = static_cast<int>(track.samples.size());
+    return track.closed ? n : n - 1;
+}
+
+Vec3 horizontalRight(const Track& track, int index) {
+    const TrackSample& prev = track.samples[prevIndex(track, index)];
+    const TrackSample& next = track.samples[nextIndex(track, index)];
     float tx = next.x - prev.x;
     float tz = next.z - prev.z;
     float len = std::sqrt(tx * tx + tz * tz);
@@ -23,9 +45,8 @@ Vec3 horizontalRight(const Track& track, int index) {
 }
 
 Vec3 roadNormal(const Track& track, int index) {
-    const int n = static_cast<int>(track.samples.size());
-    const TrackSample& prev = track.samples[(index + n - 1) % n];
-    const TrackSample& next = track.samples[(index + 1) % n];
+    const TrackSample& prev = track.samples[prevIndex(track, index)];
+    const TrackSample& next = track.samples[nextIndex(track, index)];
     Vec3 tangent = normalize(Vec3{next.x - prev.x, next.y - prev.y, next.z - prev.z});
     Vec3 right = horizontalRight(track, index);
     right.y = track.samples[index].cross;
@@ -48,9 +69,9 @@ Vec3 onRoad(const Track& track, int index, float lateral) {
 }
 
 void addRibbon(CpuMesh& mesh, const Track& track, float lat0, float lat1, Vec3 color, bool flatOuter) {
-    const int n = static_cast<int>(track.samples.size());
-    for (int i = 0; i < n; ++i) {
-        int j = (i + 1) % n;
+    const int segs = segmentCount(track);
+    for (int i = 0; i < segs; ++i) {
+        int j = nextIndex(track, i);
         Vec3 a = onRoad(track, i, lat0);
         Vec3 b = onRoad(track, i, lat1);
         Vec3 c = onRoad(track, j, lat1);
@@ -78,15 +99,15 @@ void addRibbon(CpuMesh& mesh, const Track& track, float lat0, float lat1, Vec3 c
 }
 
 void addWalls(CpuMesh& mesh, const Track& track) {
-    const int n = static_cast<int>(track.samples.size());
+    const int segs = segmentCount(track);
     const float inner = track.wallLateral();
     const float outer = inner + 0.4f;
     const float height = 0.9f;
     const Vec3 concrete{0.62f, 0.63f, 0.66f};
     for (int side = -1; side <= 1; side += 2) {
         float sign = float(side);
-        for (int i = 0; i < n; ++i) {
-            int j = (i + 1) % n;
+        for (int i = 0; i < segs; ++i) {
+            int j = nextIndex(track, i);
             Vec3 a = onRoad(track, i, sign * inner);
             Vec3 b = onRoad(track, j, sign * inner);
             Vec3 c = onRoad(track, j, sign * outer);
@@ -110,15 +131,15 @@ void addWalls(CpuMesh& mesh, const Track& track) {
 }
 
 void addCurbs(CpuMesh& mesh, const Track& track) {
-    const int n = static_cast<int>(track.samples.size());
+    const int segs = segmentCount(track);
     const Vec3 red{0.75f, 0.09f, 0.08f};
     const Vec3 white{0.90f, 0.90f, 0.92f};
     for (int side = -1; side <= 1; side += 2) {
         float sign = float(side);
         float inner = sign * track.halfWidth;
         float outer = sign * (track.halfWidth + track.curbWidth);
-        for (int i = 0; i < n; ++i) {
-            int j = (i + 1) % n;
+        for (int i = 0; i < segs; ++i) {
+            int j = nextIndex(track, i);
             bool paint = (static_cast<int>(track.samples[i].s / 3.0f) % 2) == 0;
             Vec3 color = paint ? red : white;
             Vec3 a = onRoad(track, i, inner);
@@ -131,15 +152,16 @@ void addCurbs(CpuMesh& mesh, const Track& track) {
     }
 }
 
-void addStartLine(CpuMesh& mesh, const Track& track) {
+// チェッカーのラインと門を、サンプル ia（接線は ia→ib）に出す。
+// スタートは (0, 1)、オープンコースのゴールは (最後, 最後-1) で使う。
+void addStartLine(CpuMesh& mesh, const Track& track, int ia, int ib) {
     if (track.samples.size() < 2) {
         return;
     }
-    Vec3 right = horizontalRight(track, 0);
+    Vec3 right = horizontalRight(track, ia);
     float yaw = track.spawnYaw;
-    // スポーンはラインの手前なので、ライン自体はサンプル 0 の接線を使う。
-    const TrackSample& a = track.samples[0];
-    const TrackSample& b = track.samples[1];
+    const TrackSample& a = track.samples[ia];
+    const TrackSample& b = track.samples[ib];
     float tx = b.x - a.x;
     float tz = b.z - a.z;
     float len = std::sqrt(tx * tx + tz * tz);
@@ -240,6 +262,35 @@ void addGround(CpuMesh& mesh, const Track& track) {
     mesh.addQuad(a, d, c, b, {0, 1, 0}, color);
 }
 
+// オープンコース（山道）用: 路面が谷底の平面から浮いて見えないよう、
+// 路肩の外側に沿って斜面を付ける。幅は折り返し区間で隣の路面に
+// かぶりにくい程度に抑え、外側へ緩く下げる。
+void addMountain(CpuMesh& mesh, const Track& track) {
+    const int segs = segmentCount(track);
+    const float inner = track.halfWidth + track.curbWidth + track.runoff;
+    const float outer = inner + 55.0f;
+    const Vec3 base{0.13f, 0.30f, 0.12f};
+    for (int side = -1; side <= 1; side += 2) {
+        float sign = float(side);
+        for (int i = 0; i < segs; ++i) {
+            int j = nextIndex(track, i);
+            auto pointAt = [&](int idx, float lat, float drop) {
+                Vec3 p = onRoad(track, idx, lat);
+                const TrackSample& smp = track.samples[idx];
+                float edge = sign * (track.halfWidth + track.curbWidth);
+                p.y = smp.y + edge * smp.cross - drop;
+                return p;
+            };
+            Vec3 a = pointAt(i, sign * inner, 2.2f);
+            Vec3 b = pointAt(i, sign * outer, 9.7f);
+            Vec3 c = pointAt(j, sign * outer, 9.7f);
+            Vec3 d = pointAt(j, sign * inner, 2.2f);
+            float shade = 0.92f + 0.10f * float((i * 7) % 5) / 5.0f;
+            mesh.addQuad(a, b, c, d, {0, 1, 0}, base * shade);
+        }
+    }
+}
+
 }  // namespace
 
 bool Track::load(const std::string& path) {
@@ -305,6 +356,17 @@ bool Track::load(const std::string& path) {
         ss >> key;
         if (key == "origin") {
             ss >> originLat >> originLon;
+        } else if (key == "closed") {
+            int v = 1;
+            ss >> v;
+            closed = v != 0;
+        } else if (key == "title") {
+            std::string rest;
+            std::getline(ss, rest);
+            if (!rest.empty() && rest[0] == ' ') {
+                rest.erase(0, 1);
+            }
+            title = rest;
         } else if (key == "half_width") {
             ss >> halfWidth;
         } else if (key == "curb_width") {
@@ -332,6 +394,9 @@ bool Track::load(const std::string& path) {
     length = 0;
     for (size_t i = 0; i < samples.size(); ++i) {
         samples[i].s = length;
+        if (!closed && i + 1 >= samples.size()) {
+            break;  // オープン: ゴールからスタートへは繋がない
+        }
         const TrackSample& a = samples[i];
         const TrackSample& b = samples[(i + 1) % samples.size()];
         length += std::sqrt((b.x - a.x) * (b.x - a.x) + (b.z - a.z) * (b.z - a.z));
@@ -339,6 +404,9 @@ bool Track::load(const std::string& path) {
 
     visual = CpuMesh{};
     addGround(visual, *this);
+    if (!closed) {
+        addMountain(visual, *this);
+    }
     const float curbOuter = halfWidth + curbWidth;
     const float grassOuter = curbOuter + runoff;
     addRibbon(visual, *this, -grassOuter, -curbOuter, {0.15f, 0.36f, 0.14f}, true);
@@ -347,17 +415,21 @@ bool Track::load(const std::string& path) {
     addCurbs(visual, *this);
     addWalls(visual, *this);
     addPit(visual, pit);
-    addStartLine(visual, *this);
+    addStartLine(visual, *this, 0, 1);
+    if (!closed) {
+        const int n = static_cast<int>(samples.size());
+        addStartLine(visual, *this, n - 1, n - 2);  // ゴールラインと門
+    }
     return true;
 }
 
 TrackPose Track::query(float x, float z, float yHint, float preferS) const {
     TrackPose best;
     float bestScore = 1.0e30f;
-    const int n = static_cast<int>(samples.size());
-    for (int i = 0; i < n; ++i) {
+    const int segs = segmentCount(*this);
+    for (int i = 0; i < segs; ++i) {
         const TrackSample& a = samples[i];
-        const TrackSample& b = samples[(i + 1) % n];
+        const TrackSample& b = samples[nextIndex(*this, i)];
         float abx = b.x - a.x;
         float abz = b.z - a.z;
         float len2 = abx * abx + abz * abz;
@@ -377,7 +449,7 @@ TrackPose Track::query(float x, float z, float yHint, float preferS) const {
         if (preferS >= 0.0f && length > 1.0f) {
             float along = a.s + std::sqrt(len2) * t;
             float ds = std::fabs(along - preferS);
-            if (ds > length * 0.5f) {
+            if (closed && ds > length * 0.5f) {
                 ds = length - ds;
             }
             // 今走っている周回位置から遠い路面は、交差の真下でも選ばない。
@@ -392,7 +464,7 @@ TrackPose Track::query(float x, float z, float yHint, float preferS) const {
         float tz = abz * invLen;
         best.found = true;
         best.s = a.s + std::sqrt(len2) * t;
-        if (best.s >= length) {
+        if (closed && best.s >= length) {
             best.s -= length;
         }
         best.rightX = tz;

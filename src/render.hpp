@@ -22,6 +22,9 @@ struct Renderer {
     void drawSky();
     void beginWorld(const Mat4& viewProj, Vec3 cameraPos);
     void draw(const GpuMesh& mesh, const Mat4& model);
+    // タイヤ煙などの半透明ビルボード用。頂点は [xyz, uv, alpha] の 6 float。
+    void drawSmoke(const float* verts, int vertCount, const unsigned* indices, int indexCount,
+                   const Mat4& viewProj);
     void beginHud();
     void addQuad(float x0, float y0, float x1, float y1, float r, float g, float b, float a);
     void drawLine(float x0, float y0, float x1, float y1, float thickness, float r, float g, float b, float a);
@@ -32,14 +35,19 @@ struct Renderer {
     unsigned worldProgram = 0;
     unsigned skyProgram = 0;
     unsigned hudProgram = 0;
+    unsigned smokeProgram = 0;
     unsigned dummyVao = 0;
     unsigned hudVao = 0;
     unsigned hudVbo = 0;
     unsigned hudIbo = 0;
+    unsigned smokeVao = 0;
+    unsigned smokeVbo = 0;
+    unsigned smokeIbo = 0;
     int uViewProj = -1;
     int uModel = -1;
     int uCamPos = -1;
     int uOrtho = -1;
+    int uSmokeViewProj = -1;
     std::vector<float> hudVerts;
     std::vector<unsigned> hudIndices;
 };
