@@ -29,7 +29,7 @@ constexpr float kGripSteerSlide = 1.9f;   // ステアだけで大きく切っ�
 constexpr float kGripCombo = 1.0f;      // ステア＋サイドの組み合わせ（後輪はほぼフリー）
 constexpr float kYawResponseGrip = 15.5f;   // ヨーレートが目標へ追従する速さ (1/s)
 constexpr float kYawResponseDrift = 12.5f;  // ドリフト中もステアで向きを動かせる追従
-constexpr float kDriftEnterSlip = 0.16f;    // ドリフト開始のスリップ角 (rad, 約9°)
+constexpr float kDriftEnterSlip = 0.19f;    // ドリフト開始のスリップ角 (rad, 約11°)
 constexpr float kDriftExitSlip = 0.12f;     // ここまで滑りが収まったらグリップへ戻れる (rad)
 constexpr float kDriftRecoverBase = 0.075f;  // 何もしなくても溜まる回復の速さ (/s)。とてもゆっくり
 constexpr float kDriftRecoverCounter = 1.7f;  // カウンターステア時の上乗せ (/s)
@@ -126,7 +126,7 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
         } else {
             slipEntryHold = 0.0f;
         }
-        if ((input.handbrake && speedNow > 3.5f) || slipEntryHold > 0.06f) {
+        if ((input.handbrake && speedNow > 3.5f) || slipEntryHold > 0.09f) {
             drifting = true;
             driftRecovery = 0;
             driftCounterAge = 10.0f;
@@ -144,23 +144,23 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
     // 一瞬のステア修正で誤発しないよう継続時間で判定する。
     const float steerLimit = maxSteerAt(vF);
     bool powerCondition = input.throttle > 0.80f && steerLimit > 0.01f &&
-                          std::fabs(steerAngle) > steerLimit * 0.68f &&
+                          std::fabs(steerAngle) > steerLimit * 0.75f &&
                           vF > 10.0f && vF < 42.0f && onAsphalt;
     powerSlideHold = powerCondition ? powerSlideHold + dt : 0.0f;
-    if (powerSlideHold > 0.15f) {
+    if (powerSlideHold > 0.20f) {
         gripTarget = std::min(gripTarget, kGripInitiate);
     }
 
     // ステアリングだけでも滑り出しを作る（フリック）。
     // 速度が乗った状態で大きく切ると、荷重移動で後ろが軽くなってお尻が出る。
     // アクセルもブレーキも要らない。直進からでも、曲がりすぎたらそのまま
-    // ドリフトへ、が狙い。一瞬の当て舵では誤発しないよう、0.05 秒だけ
+    // ドリフトへ、が狙い。一瞬の当て舵では誤発しないよう、0.07 秒だけ
     // 継続を要求する（体感では即時）。通常コーナリングの切り角（〜0.6）では
-    // 発動しないよう、閾値は 0.65 に置く。
-    bool steerCondition = std::fabs(input.steer) > 0.65f && vF > 8.0f && vF < 70.0f &&
+    // 発動しないよう、閾値は 0.72 に置く。
+    bool steerCondition = std::fabs(input.steer) > 0.72f && vF > 8.0f && vF < 70.0f &&
                           onAsphalt;
     steerSlideHold = steerCondition ? steerSlideHold + dt : 0.0f;
-    if (steerSlideHold > 0.05f) {
+    if (steerSlideHold > 0.07f) {
         gripTarget = std::min(gripTarget, kGripSteerSlide);
     }
 

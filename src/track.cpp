@@ -216,14 +216,15 @@ float treeRand(int k) {
     return float(h & 0xffffffu) / float(0x1000000u);
 }
 
-void addTree(CpuMesh& mesh, float cx, float cz, float baseY, int seed) {
-    const float trunkH = 1.9f + treeRand(seed * 7 + 1) * 0.7f;
+void addTree(CpuMesh& mesh, float cx, float cz, float baseY, int seed, float scale = 1.0f) {
+    const float trunkH = (1.9f + treeRand(seed * 7 + 1) * 0.7f) * scale;
     const Vec3 bark{0.30f, 0.22f, 0.15f};
-    mesh.addBox({cx - 0.16f, baseY - 0.3f, cz - 0.16f}, {cx + 0.16f, baseY + trunkH, cz + 0.16f}, bark);
+    mesh.addBox({cx - 0.16f * scale, baseY - 0.3f, cz - 0.16f * scale},
+                {cx + 0.16f * scale, baseY + trunkH, cz + 0.16f * scale}, bark);
     float g = 0.26f + treeRand(seed * 7 + 2) * 0.13f;
     Vec3 leaf{0.09f + treeRand(seed * 7 + 3) * 0.05f, g, 0.10f + treeRand(seed * 7 + 4) * 0.05f};
-    const float radius = 1.7f + treeRand(seed * 7 + 5) * 1.1f;
-    const float height = 5.4f + treeRand(seed * 7 + 6) * 2.4f;
+    const float radius = (1.7f + treeRand(seed * 7 + 5) * 1.1f) * scale;
+    const float height = (5.4f + treeRand(seed * 7 + 6) * 2.4f) * scale;
     // 杉のような円錐を2段重ねる
     const int segN = 7;
     for (int tier = 0; tier < 2; ++tier) {
@@ -246,43 +247,93 @@ void addTree(CpuMesh& mesh, float cx, float cz, float baseY, int seed) {
 }
 
 // 路肩の外の斜面に沿って森を作る。近くの別の区間（折り返しの反対側など）に
-// かぶる候補は捨てる。
+// かぶる候補は捨てる。近い帯（密な林）と遠い帯（大きな木で奥行きを出す）の
+// 2層にして、山の斜面が続いているように見せる。
 void addTrees(CpuMesh& mesh, const Track& track) {
     const int n = static_cast<int>(track.samples.size());
     const float wall = track.wallLateral();
     const int segs = segmentCount(track);
     int seed = 0;
-    for (int i = 0; i < segs; i += 3) {
+    auto tryPlant = [&](int i, float sign, float lat, float scale, int sd) {
+        Vec3 right = horizontalRight(track, i);
+        float cx = track.samples[i].x + right.x * sign * lat;
+        float cz = track.samples[i].z + right.z * sign * lat;
+        float edge = sign * (track.halfWidth + track.curbWidth);
+        float baseY = track.samples[i].y + edge * track.samples[i].cross
+                      - 2.2f - (lat - wall) * 0.136f - 0.25f;
+        for (int j = 0; j < n; ++j) {
+            float dx = track.samples[j].x - cx;
+            float dz = track.samples[j].z - cz;
+            float d2 = dx * dx + dz * dz;
+            if (d2 < (wall + 2.5f) * (wall + 2.5f)) {
+                return;  // どこかの路面・レールの内側には植えない
+            }
+            if (d2 < 24.0f * 24.0f && track.samples[j].y > baseY + 5.0f) {
+                return;  // 自分より高い路面が近い＝その下敷きになる
+            }
+        }
+        addTree(mesh, cx, cz, baseY, sd, scale);
+    };
+    for (int i = 0; i < segs; i += 2) {
         for (int side = -1; side <= 1; side += 2) {
-            ++seed;
-            if (treeRand(seed * 31 + 7) < 0.15f) {
-                continue;
-            }
             float sign = float(side);
-            float lat = wall + 3.5f + treeRand(seed * 31 + 8) * 30.0f;
-            Vec3 right = horizontalRight(track, i);
-            float cx = track.samples[i].x + right.x * sign * lat;
-            float cz = track.samples[i].z + right.z * sign * lat;
-            float edge = sign * (track.halfWidth + track.curbWidth);
-            float baseY = track.samples[i].y + edge * track.samples[i].cross
-                          - 2.2f - (lat - wall) * 0.136f - 0.25f;
-            bool ok = true;
-            for (int j = 0; j < n && ok; ++j) {
-                float dx = track.samples[j].x - cx;
-                float dz = track.samples[j].z - cz;
-                float d2 = dx * dx + dz * dz;
-                if (d2 < (wall + 2.5f) * (wall + 2.5f)) {
-                    ok = false;  // どこかの路面・レールの内側には植えない
-                } else if (d2 < 24.0f * 24.0f && track.samples[j].y > baseY + 5.0f) {
-                    ok = false;  // 自分より高い路面が近い＝その下敷きになる
-                }
+            ++seed;
+            if (treeRand(seed * 31 + 7) >= 0.30f) {
+                float lat = wall + 3.5f + treeRand(seed * 31 + 8) * 30.0f;
+                tryPlant(i, sign, lat, 0.9f + treeRand(seed * 31 + 9) * 0.3f, seed);
             }
-            if (ok) {
-                addTree(mesh, cx, cz, baseY, seed);
+            ++seed;
+            if (treeRand(seed * 31 + 7) >= 0.65f) {
+                float lat = wall + 32.0f + treeRand(seed * 31 + 8) * 45.0f;
+                tryPlant(i, sign, lat, 1.6f + treeRand(seed * 31 + 9) * 0.8f, seed);
             }
         }
     }
     (void)n;
+}
+
+// 遠景の山並み: コースの周囲に大きな稜線シルエットを置いて「山の中」に
+// いる感じを出す。コースから十分遠く、地形（路面・斜面）には一切
+// 干渉しないので、折り返し区間でも破綻しない。
+void addBackdropRidges(CpuMesh& mesh, const Track& track) {
+    if (track.samples.empty()) {
+        return;
+    }
+    float minX = track.samples[0].x, maxX = minX;
+    float minZ = track.samples[0].z, maxZ = minZ;
+    float minY = track.samples[0].y;
+    for (const TrackSample& s : track.samples) {
+        minX = std::min(minX, s.x); maxX = std::max(maxX, s.x);
+        minZ = std::min(minZ, s.z); maxZ = std::max(maxZ, s.z);
+        minY = std::min(minY, s.y);
+    }
+    const float cx = (minX + maxX) * 0.5f;
+    const float cz = (minZ + maxZ) * 0.5f;
+    const float baseR = std::max(maxX - minX, maxZ - minZ) * 0.5f;
+    const float baseY = minY - 6.0f;
+    const int peaks = 16;
+    for (int k = 0; k < peaks; ++k) {
+        float ang = 6.2831853f * float(k) / float(peaks);
+        float dist = baseR + 260.0f + treeRand(k * 17 + 1) * 260.0f;
+        float px = cx + std::cos(ang) * dist;
+        float pz = cz + std::sin(ang) * dist;
+        float h = 130.0f + treeRand(k * 17 + 2) * 130.0f;
+        float r = 200.0f + treeRand(k * 17 + 3) * 160.0f;
+        float shade = 0.85f + treeRand(k * 17 + 4) * 0.3f;
+        Vec3 col{0.30f * shade, 0.42f * shade, 0.34f * shade};
+        Vec3 apex{px, baseY + h, pz};
+        const int segN = 9;
+        float rot = treeRand(k * 17 + 5) * 6.2831853f;
+        for (int sgm = 0; sgm < segN; ++sgm) {
+            float a0 = rot + 6.2831853f * float(sgm) / float(segN);
+            float a1 = rot + 6.2831853f * float(sgm + 1) / float(segN);
+            Vec3 p0{px + std::cos(a0) * r, baseY, pz + std::sin(a0) * r};
+            Vec3 p1{px + std::cos(a1) * r, baseY, pz + std::sin(a1) * r};
+            Vec3 mid = (p0 + p1) * 0.5f - Vec3{px, 0, pz};
+            Vec3 nrm = normalize(Vec3{mid.x, 0.5f, mid.z});
+            mesh.addTriangle(p0, p1, apex, nrm, col);
+        }
+    }
 }
 
 void addCurbs(CpuMesh& mesh, const Track& track) {
@@ -580,6 +631,7 @@ bool Track::load(const std::string& path) {
         addRoadMarkings(visual, *this);
         addGuardrails(visual, *this);
         addTrees(visual, *this);
+        addBackdropRidges(visual, *this);
     } else {
         addRibbon(visual, *this, -grassOuter, -curbOuter, {0.15f, 0.36f, 0.14f}, true);
         addRibbon(visual, *this, curbOuter, grassOuter, {0.15f, 0.36f, 0.14f}, true);

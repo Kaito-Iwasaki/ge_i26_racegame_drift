@@ -6,10 +6,10 @@ Produces akina.txt in exactly the same format as suzuka.txt:
   header keys (origin / half_width / curb_width / length / spawn / names / samples)
   sample rows:  x z y cross bridge corner nameId
 
-The course is an OPEN downhill (point-to-point), 7,552 m like the
-Initial D Akina map the user supplied:
-  Section 4 (start side) 2,026 m / Section 3 1,884 m /
-  Section 2 1,962 m (composite S) / Section 1 1,680 m (five hairpins)
+The course is an OPEN downhill (point-to-point), ~7,500 m, laid out
+after the real Akina (Mt. Haruna) route map the user supplied:
+Ikaho start -> west along the ridge past Nagamine -> the Takane
+switchback cluster -> a long southern hook -> final hairpins.
 
 Geometry is built from straights + constant-radius arcs (analytic),
 then resampled at ~4 m. Elevation is a smooth grade profile integrated
@@ -25,96 +25,98 @@ import sys
 # heading: degrees, 0 = north (+z), 90 = east (+x). forward = (sin, cos).
 
 SECTIONS = [
-    # (section title, target length, [elements])   -- flex lines absorb the remainder
-    ("Section 4", 2026.0, [
-        ("line", 120.0, "Shoreline Straight"),
-        ("arc", 150.0, 38.0, "First Bend"),
-        ("line", 80.0, "Shoreline Straight"),
-        ("arc", 90.0, -55.0, "Lakeside Bend"),
-        ("line", 140.0, "Ridge Road"),
-        ("arc", 70.0, 85.0, "Pine Bend"),
-        ("line", 60.0, "Ridge Road"),
-        ("arc", 120.0, -40.0, "Ridge S Curves"),
-        ("line", 180.0, "Ridge S Curves"),
-        ("arc", 48.0, -115.0, "Pine Hairpin"),
-        ("line", 70.0, "West Ridge"),
-        ("arc", 65.0, 95.0, "West Ridge Bend"),
-        ("line", 130.0, "West Ridge"),
-        ("arc", 110.0, -35.0, "Section 4 Exit"),
-        ("line", 140.0, "West Ridge Descent"),
-        ("arc", 60.0, 50.0, "Ridge Hairpin West"),
-        ("line", 150.0, "North Ridge"),
-        ("arc", 70.0, -80.0, "Ridge Drop Bend"),
-        ("arc", 80.0, 30.0, "Section 4 Exit"),
+    # Map layout (Ikaho -> west along the ridge -> Takane switchback cluster
+    # -> long southern hook -> final switchbacks to the goal).
+    ("Section 4", 1850.0, [
+        ("line", 150.0, "Ikaho Straight"),
+        ("arc", 55.0, 42.0, "Ikaho Zigzag"),
+        ("line", 30.0, "Ikaho Straight"),
+        ("arc", 55.0, -46.0, "Ikaho Zigzag"),
+        ("line", 120.0, "Ikaho Straight"),
+        ("arc", 120.0, 26.0, "West Gate Bend"),
+        ("line", 90.0, "Nagamine Approach"),
+        ("arc", 80.0, -38.0, "Nagamine Bend"),
+        ("line", 260.0, "Nagamine Parkside"),
+        ("arc", 95.0, -14.0, "Nagamine Park Bend"),
+        ("line", 130.0, "Nagamine Parkside"),
+        ("arc", 70.0, 58.0, "Ridge S Entry"),
+        ("line", 70.0, "Ridge S Curves"),
+        ("arc", 85.0, -44.0, "Ridge S Exit"),
+        ("line", 110.0, "West Ridge"),
+        ("arc", 65.0, 48.0, "Ridge S 2"),
+        ("line", 80.0, "West Ridge"),
+        ("arc", 65.0, -48.0, "Ridge S 2"),
+        ("arc", 130.0, -10.0, "Section 4 Exit"),
         ("flex", 0.0, "Section 4 Exit"),
     ]),
-    ("Section 3", 1884.0, [
-        ("line", 100.0, "Upper Touge"),
-        ("arc", 42.0, -135.0, "Long Hairpin"),
-        ("line", 150.0, "Upper Touge"),
-        ("arc", 50.0, 115.0, "Switchback Bend"),
+    ("Section 3", 1800.0, [
         ("line", 120.0, "Upper Touge"),
-        ("arc", 60.0, -70.0, "Cliff Bend"),
-        ("line", 90.0, "Cliff Straight"),
-        ("arc", 38.0, 120.0, "Rock Face Hairpin"),
-        ("line", 100.0, "Cliff Straight"),
-        ("arc", 70.0, -45.0, "Mid Touge Bend"),
-        ("line", 220.0, "Mid Touge"),
-        ("arc", 95.0, 42.0, "Mid Touge Bend"),
-        ("line", 200.0, "Mid Touge"),
-        ("arc", 80.0, -25.0, "Section 3 Exit"),
-        ("line", 180.0, "South Descent"),
-        ("arc", 55.0, -88.0, "South Hairpin"),
+        ("arc", 60.0, -48.0, "Upper S 1"),
+        ("line", 60.0, "Upper Touge"),
+        ("arc", 60.0, 64.0, "Upper S 2"),
+        ("line", 90.0, "Upper Touge"),
+        ("arc", 75.0, -46.0, "Cliff Bend"),
+        ("line", 230.0, "Cliff Straight"),
+        ("arc", 45.0, 58.0, "Rock Bend"),
+        ("line", 80.0, "Mid Touge"),
+        ("arc", 90.0, -30.0, "Mid Touge Bend"),
+        ("line", 190.0, "Mid Touge"),
+        ("arc", 70.0, -42.0, "Mid Touge Bend 2"),
+        ("line", 60.0, "Mid Touge"),
+        ("arc", 55.0, -18.0, "Takane Approach Bend"),
+        ("line", 70.0, "Takane Approach"),
+        ("arc", 80.0, 36.0, "Upper Ridge Bend"),
+        ("line", 90.0, "Takane Approach"),
+        ("arc", 65.0, 34.0, "Section 3 Exit"),
         ("flex", 0.0, "Section 3 Exit"),
     ]),
-    ("Section 2", 1962.0, [
-        ("line", 80.0, "Composite S Entrance"),
-        ("arc", 55.0, -140.0, "Composite S 1"),
-        ("line", 200.0, "Composite S Curves"),
-        ("arc", 48.0, 165.0, "Composite S 2"),
-        ("line", 160.0, "Composite S Curves"),
-        ("arc", 60.0, -115.0, "Composite S 3"),
-        ("line", 140.0, "Composite S Exit"),
-        ("arc", 58.0, 105.0, "Valley Bend"),
-        ("line", 80.0, "Valley Road"),
-        ("arc", 66.0, -60.0, "Valley Bend"),
-        ("line", 100.0, "Valley Road"),
-        ("arc", 52.0, 80.0, "Gutter Bend"),
-        ("line", 120.0, "Lower Touge"),
-        ("arc", 85.0, -38.0, "Lower Touge Bend"),
-        ("line", 120.0, "Lower Touge"),
-        ("arc", 78.0, 36.0, "Section 2 Exit"),
+    ("Section 2", 1500.0, [
+        ("line", 70.0, "Takane Switchbacks"),
+        ("arc", 18.0, -160.0, "Takane Hairpin 1"),
+        ("line", 55.0, "Takane Switchbacks"),
+        ("arc", 18.0, 160.0, "Takane Hairpin 2"),
+        ("line", 55.0, "Takane Switchbacks"),
+        ("arc", 17.0, -162.0, "Takane Hairpin 3"),
+        ("line", 60.0, "Takane Switchbacks"),
+        ("arc", 19.0, 160.0, "Takane Hairpin 4"),
+        ("line", 50.0, "Takane Switchbacks"),
+        ("arc", 17.0, -160.0, "Takane Hairpin 5"),
+        ("line", 65.0, "Takane Switchbacks"),
+        ("arc", 18.0, 158.0, "Takane Hairpin 6"),
+        ("line", 150.0, "South Ridge"),
+        ("arc", 70.0, -46.0, "South Ridge Bend"),
+        ("line", 190.0, "South Ridge"),
+        ("arc", 95.0, 30.0, "Section 2 Exit"),
         ("flex", 0.0, "Section 2 Exit"),
     ]),
-    ("Section 1", 1680.0, [
-        ("line", 60.0, "Hairpin Entrance"),
-        ("arc", 45.0, -85.0, "Hairpin Approach"),
-        ("line", 150.0, "Five Hairpins"),
-        ("arc", 16.0, 160.0, "Hairpin 1"),
-        ("line", 170.0, "Five Hairpins"),
-        ("arc", 16.0, -160.0, "Hairpin 2"),
-        ("line", 170.0, "Five Hairpins"),
-        ("arc", 16.0, 160.0, "Hairpin 3"),
-        ("line", 170.0, "Five Hairpins"),
-        ("arc", 16.0, -160.0, "Hairpin 4"),
-        ("line", 170.0, "Five Hairpins"),
-        ("arc", 16.0, 160.0, "Hairpin 5"),
-        ("line", 140.0, "Final Straight"),
-        ("arc", 50.0, -70.0, "Final Corner"),
+    ("Section 1", 2100.0, [
+        ("line", 100.0, "Hook Entrance"),
+        ("arc", 175.0, -118.0, "Great Hook"),
+        ("line", 170.0, "Hook Exit Straight"),
+        ("arc", 85.0, 54.0, "Valley S 1"),
+        ("line", 80.0, "Valley Road"),
+        ("arc", 85.0, -34.0, "Valley S 2"),
+        ("line", 240.0, "Valley Road"),
+        ("arc", 22.0, 155.0, "Final Hairpin 1"),
+        ("line", 120.0, "Final Descent"),
+        ("arc", 21.0, -158.0, "Final Hairpin 2"),
+        ("line", 130.0, "Final Descent"),
+        ("arc", 24.0, 150.0, "Final Hairpin 3"),
+        ("line", 110.0, "Goal Approach"),
+        ("arc", 60.0, -52.0, "Final Corner"),
         ("flex", 0.0, "Goal Straight"),
     ]),
 ]
 
 START_POS = (1180.0, 780.0)     # (x, z) of s = 0
-START_HEADING_DEG = 268.0       # almost due west, a touch south
+START_HEADING_DEG = 272.0       # due west, a touch north (Ikaho -> Nagamine)
 
 # grade knots: (s, grade) grade < 0 = downhill. Cosine-smoothed between knots.
 GRADE_KNOTS = [
-    (0.0, -0.015), (200.0, -0.045), (600.0, -0.065), (1100.0, -0.055),
-    (1600.0, -0.075), (2026.0, -0.070), (2500.0, -0.085), (3100.0, -0.075),
-    (3600.0, -0.090), (3910.0, -0.080), (4400.0, -0.065), (5000.0, -0.080),
-    (5500.0, -0.070), (5872.0, -0.075), (6200.0, -0.095), (6800.0, -0.100),
-    (7200.0, -0.085), (7552.0, -0.060),
+    (0.0, -0.015), (250.0, -0.040), (700.0, -0.055), (1200.0, -0.050),
+    (1850.0, -0.065), (2300.0, -0.080), (2900.0, -0.075), (3650.0, -0.085),
+    (4100.0, -0.095), (4600.0, -0.100), (5000.0, -0.090), (5150.0, -0.085),
+    (5700.0, -0.070), (6400.0, -0.085), (7250.0, -0.055),
 ]
 FINISH_Y = 18.0
 
@@ -268,7 +270,7 @@ def main():
     # section as its check point for a few samples so the HUD shows it.
     bounds = [b[0] for b in section_bounds]  # dense-s boundaries ~ section starts
     # recompute section starts in true s by proportion (dense s == true s closely)
-    sec_start_s = [0.0, 2026.0, 3910.0, 5872.0]
+    sec_start_s = [0.0, 1850.0, 3650.0, 5150.0]
     cp_names = [None, "Check Point 3", "Check Point 2", "Check Point 1"]
     for start_s, cp in zip(sec_start_s, cp_names):
         if cp is None:
@@ -288,7 +290,7 @@ def main():
     with open(out_path, "w") as f:
         f.write("# Akina Downhill - Mt. Haruna (Harunasan) touge, after the Initial D course map\n")
         f.write("# Point-to-point downhill: NOT a loop. Requires the 'closed 0' support in track.cpp.\n")
-        f.write("# Sections (from the map): total 7552 m = Sec.4 2026 m + Sec.3 1884 m + Sec.2 1962 m + Sec.1 1680 m\n")
+        f.write("# Sections (from the route map): total ~7250 m = Sec.4 1850 m + Sec.3 1800 m + Sec.2 1500 m + Sec.1 2100 m\n")
         f.write("# Elevation drop is a designed profile in the spirit of the pass (game physics has no slope gravity).\n")
         f.write("origin 36.471300 138.873000\n")
         f.write("title Akina Downhill\n")
