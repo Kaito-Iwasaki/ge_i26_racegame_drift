@@ -5,6 +5,8 @@
 origin 36.471300 138.873000
 title Akina Downhill
 closed 0
+style touge
+runoff 2.40
 half_width 5.00
 curb_width 0.70
 length 7550.502

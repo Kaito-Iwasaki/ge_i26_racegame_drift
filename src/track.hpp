@@ -42,6 +42,7 @@ struct Track {
     float runoff = 8.0f;
     float length = 0;
     bool closed = true;
+    bool touge = false;  // `style touge`: 峠仕様の見た目（ガードレール・林・センターライン）
     std::string title;
     float spawnX = 0;
     float spawnY = 0;

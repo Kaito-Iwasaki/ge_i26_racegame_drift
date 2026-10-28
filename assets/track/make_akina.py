@@ -293,6 +293,8 @@ def main():
         f.write("origin 36.471300 138.873000\n")
         f.write("title Akina Downhill\n")
         f.write("closed 0\n")
+        f.write("style touge\n")
+        f.write("runoff 2.40\n")
         f.write("half_width 5.00\n")
         f.write("curb_width 0.70\n")
         f.write(f"length {length:.3f}\n")

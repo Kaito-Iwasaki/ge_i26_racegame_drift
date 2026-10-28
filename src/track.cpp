@@ -130,6 +130,161 @@ void addWalls(CpuMesh& mesh, const Track& track) {
     }
 }
 
+// 路面から少し浮かせた帯（白線などのマーキング用。通常のリボンと
+// 重なるとチラつくので 0.03 m 上げる）。dashLen > 0 のときは破線。
+void addMarkingRibbon(CpuMesh& mesh, const Track& track, float lat0, float lat1, Vec3 color, float dashLen) {
+    const int segs = segmentCount(track);
+    for (int i = 0; i < segs; ++i) {
+        if (dashLen > 0.0f) {
+            float phase = std::fmod(track.samples[i].s, dashLen * 2.0f);
+            if (phase > dashLen) {
+                continue;
+            }
+        }
+        int j = nextIndex(track, i);
+        Vec3 a = onRoad(track, i, lat0);
+        Vec3 b = onRoad(track, i, lat1);
+        Vec3 c = onRoad(track, j, lat1);
+        Vec3 d = onRoad(track, j, lat0);
+        a.y += 0.03f;
+        b.y += 0.03f;
+        c.y += 0.03f;
+        d.y += 0.03f;
+        Vec3 normal = normalize(roadNormal(track, i) + roadNormal(track, j));
+        mesh.addQuad(a, b, c, d, normal, color);
+    }
+}
+
+// 峠のセンターライン（破線）と両側の白い路側帯。
+void addRoadMarkings(CpuMesh& mesh, const Track& track) {
+    const Vec3 lineWhite{0.84f, 0.84f, 0.80f};
+    const float edgeIn = track.halfWidth - 0.50f;
+    const float edgeOut = track.halfWidth - 0.20f;
+    addMarkingRibbon(mesh, track, edgeIn, edgeOut, lineWhite, 0.0f);
+    addMarkingRibbon(mesh, track, -edgeOut, -edgeIn, lineWhite, 0.0f);
+    addMarkingRibbon(mesh, track, -0.13f, 0.13f, lineWhite, 5.0f);
+}
+
+// 日本の峠のガードレール: 支柱＋銀色のビーム1段。物理上の壁
+// （wallLateral）の内側に面を合わせる。支柱の上にはオレンジの
+// 視線誘導標（デリネーター）を付ける。
+void addGuardrails(CpuMesh& mesh, const Track& track) {
+    const int segs = segmentCount(track);
+    const float face = track.wallLateral() - 0.05f;
+    const Vec3 beam{0.76f, 0.78f, 0.80f};
+    const Vec3 post{0.52f, 0.54f, 0.56f};
+    const Vec3 reflector{0.98f, 0.48f, 0.07f};
+    for (int side = -1; side <= 1; side += 2) {
+        float sign = float(side);
+        for (int i = 0; i < segs; ++i) {
+            int j = nextIndex(track, i);
+            auto baseAt = [&](int idx) {
+                Vec3 p = onRoad(track, idx, sign * face);
+                float edge = sign * (track.halfWidth + track.curbWidth);
+                p.y = track.samples[idx].y + edge * track.samples[idx].cross;
+                return p;
+            };
+            Vec3 a = baseAt(i);
+            Vec3 b = baseAt(j);
+            Vec3 inward{-sign * horizontalRight(track, i).x, 0, -sign * horizontalRight(track, i).z};
+            float shade = 0.94f + 0.08f * float((i * 11) % 4) / 4.0f;
+            mesh.addQuad(a + Vec3{0, 0.38f, 0}, b + Vec3{0, 0.38f, 0}, b + Vec3{0, 0.82f, 0},
+                         a + Vec3{0, 0.82f, 0}, inward, beam * shade);
+            if (i % 2 == 0) {
+                // 支柱（路面側から見える板）とデリネーター
+                Vec3 right = horizontalRight(track, i);
+                Vec3 c = onRoad(track, i, sign * (face + 0.16f));
+                c.y = a.y;
+                Vec3 r = right * 0.09f;
+                mesh.addQuad(c - r, c + r, c + r + Vec3{0, 0.80f, 0}, c - r + Vec3{0, 0.80f, 0},
+                             inward, post);
+                Vec3 d = c + Vec3{0, 0.52f, 0} - inward * 0.18f;
+                Vec3 rr = right * 0.055f;
+                mesh.addQuad(d - rr, d + rr, d + rr + Vec3{0, 0.20f, 0}, d - rr + Vec3{0, 0.20f, 0},
+                             inward, reflector);
+            }
+        }
+    }
+}
+
+// 決定的なハッシュ乱数（コースを読み直しても同じ森になるように）。
+float treeRand(int k) {
+    std::uint32_t h = std::uint32_t(k + 1) * 2654435761u;
+    h ^= h >> 15;
+    h *= 2246822519u;
+    h ^= h >> 13;
+    return float(h & 0xffffffu) / float(0x1000000u);
+}
+
+void addTree(CpuMesh& mesh, float cx, float cz, float baseY, int seed) {
+    const float trunkH = 1.9f + treeRand(seed * 7 + 1) * 0.7f;
+    const Vec3 bark{0.30f, 0.22f, 0.15f};
+    mesh.addBox({cx - 0.16f, baseY - 0.3f, cz - 0.16f}, {cx + 0.16f, baseY + trunkH, cz + 0.16f}, bark);
+    float g = 0.26f + treeRand(seed * 7 + 2) * 0.13f;
+    Vec3 leaf{0.09f + treeRand(seed * 7 + 3) * 0.05f, g, 0.10f + treeRand(seed * 7 + 4) * 0.05f};
+    const float radius = 1.7f + treeRand(seed * 7 + 5) * 1.1f;
+    const float height = 5.4f + treeRand(seed * 7 + 6) * 2.4f;
+    // 杉のような円錐を2段重ねる
+    const int segN = 7;
+    for (int tier = 0; tier < 2; ++tier) {
+        float t0 = tier == 0 ? 0.0f : 0.42f;
+        float baseR = radius * (tier == 0 ? 1.0f : 0.62f);
+        float yBase = baseY + trunkH * 0.55f + height * t0;
+        float yTop = baseY + trunkH * 0.55f + height * (tier == 0 ? 0.72f : 1.0f);
+        Vec3 apex{cx, yTop, cz};
+        float rot = treeRand(seed * 13 + tier) * 6.2831853f;
+        for (int k = 0; k < segN; ++k) {
+            float a0 = rot + 6.2831853f * float(k) / float(segN);
+            float a1 = rot + 6.2831853f * float(k + 1) / float(segN);
+            Vec3 p0{cx + std::cos(a0) * baseR, yBase, cz + std::sin(a0) * baseR};
+            Vec3 p1{cx + std::cos(a1) * baseR, yBase, cz + std::sin(a1) * baseR};
+            Vec3 mid = (p0 + p1) * 0.5f - Vec3{cx, 0, cz};
+            Vec3 n = normalize(Vec3{mid.x, 0.45f, mid.z});
+            mesh.addTriangle(p0, p1, apex, n, leaf * (tier == 0 ? 1.0f : 1.12f));
+        }
+    }
+}
+
+// 路肩の外の斜面に沿って森を作る。近くの別の区間（折り返しの反対側など）に
+// かぶる候補は捨てる。
+void addTrees(CpuMesh& mesh, const Track& track) {
+    const int n = static_cast<int>(track.samples.size());
+    const float wall = track.wallLateral();
+    const int segs = segmentCount(track);
+    int seed = 0;
+    for (int i = 0; i < segs; i += 3) {
+        for (int side = -1; side <= 1; side += 2) {
+            ++seed;
+            if (treeRand(seed * 31 + 7) < 0.15f) {
+                continue;
+            }
+            float sign = float(side);
+            float lat = wall + 3.5f + treeRand(seed * 31 + 8) * 30.0f;
+            Vec3 right = horizontalRight(track, i);
+            float cx = track.samples[i].x + right.x * sign * lat;
+            float cz = track.samples[i].z + right.z * sign * lat;
+            float edge = sign * (track.halfWidth + track.curbWidth);
+            float baseY = track.samples[i].y + edge * track.samples[i].cross
+                          - 2.2f - (lat - wall) * 0.136f - 0.25f;
+            bool ok = true;
+            for (int j = 0; j < n && ok; ++j) {
+                float dx = track.samples[j].x - cx;
+                float dz = track.samples[j].z - cz;
+                float d2 = dx * dx + dz * dz;
+                if (d2 < (wall + 2.5f) * (wall + 2.5f)) {
+                    ok = false;  // どこかの路面・レールの内側には植えない
+                } else if (d2 < 24.0f * 24.0f && track.samples[j].y > baseY + 5.0f) {
+                    ok = false;  // 自分より高い路面が近い＝その下敷きになる
+                }
+            }
+            if (ok) {
+                addTree(mesh, cx, cz, baseY, seed);
+            }
+        }
+    }
+    (void)n;
+}
+
 void addCurbs(CpuMesh& mesh, const Track& track) {
     const int segs = segmentCount(track);
     const Vec3 red{0.75f, 0.09f, 0.08f};
@@ -239,7 +394,7 @@ void addPit(CpuMesh& mesh, const std::vector<Vec3>& pit) {
     }
 }
 
-void addGround(CpuMesh& mesh, const Track& track) {
+void addGround(CpuMesh& mesh, const Track& track, Vec3 color) {
     float minX = track.samples[0].x;
     float maxX = minX;
     float minZ = track.samples[0].z;
@@ -254,7 +409,6 @@ void addGround(CpuMesh& mesh, const Track& track) {
     }
     const float pad = 120.0f;
     float y = minY - 4.0f;
-    Vec3 color{0.12f, 0.27f, 0.11f};
     Vec3 a{minX - pad, y, minZ - pad};
     Vec3 b{maxX + pad, y, minZ - pad};
     Vec3 c{maxX + pad, y, maxZ + pad};
@@ -367,6 +521,12 @@ bool Track::load(const std::string& path) {
                 rest.erase(0, 1);
             }
             title = rest;
+        } else if (key == "style") {
+            std::string v;
+            ss >> v;
+            touge = v == "touge";
+        } else if (key == "runoff") {
+            ss >> runoff;
         } else if (key == "half_width") {
             ss >> halfWidth;
         } else if (key == "curb_width") {
@@ -403,17 +563,30 @@ bool Track::load(const std::string& path) {
     }
 
     visual = CpuMesh{};
-    addGround(visual, *this);
+    addGround(visual, *this, touge ? Vec3{0.08f, 0.20f, 0.08f} : Vec3{0.12f, 0.27f, 0.11f});
     if (!closed) {
         addMountain(visual, *this);
     }
     const float curbOuter = halfWidth + curbWidth;
     const float grassOuter = curbOuter + runoff;
-    addRibbon(visual, *this, -grassOuter, -curbOuter, {0.15f, 0.36f, 0.14f}, true);
-    addRibbon(visual, *this, curbOuter, grassOuter, {0.15f, 0.36f, 0.14f}, true);
-    addRibbon(visual, *this, -halfWidth, halfWidth, {0.17f, 0.17f, 0.19f}, false);
-    addCurbs(visual, *this);
-    addWalls(visual, *this);
+    if (touge) {
+        // 峠仕様: 赤白の縁石とコンクリート壁は使わない。路肩は土、
+        // その外は林床の色にして、ガードレールと杉林で囲う。
+        addRibbon(visual, *this, -grassOuter, -curbOuter, {0.13f, 0.30f, 0.12f}, true);
+        addRibbon(visual, *this, curbOuter, grassOuter, {0.13f, 0.30f, 0.12f}, true);
+        addRibbon(visual, *this, -curbOuter, -halfWidth, {0.40f, 0.36f, 0.28f}, true);
+        addRibbon(visual, *this, halfWidth, curbOuter, {0.40f, 0.36f, 0.28f}, true);
+        addRibbon(visual, *this, -halfWidth, halfWidth, {0.15f, 0.15f, 0.16f}, false);
+        addRoadMarkings(visual, *this);
+        addGuardrails(visual, *this);
+        addTrees(visual, *this);
+    } else {
+        addRibbon(visual, *this, -grassOuter, -curbOuter, {0.15f, 0.36f, 0.14f}, true);
+        addRibbon(visual, *this, curbOuter, grassOuter, {0.15f, 0.36f, 0.14f}, true);
+        addRibbon(visual, *this, -halfWidth, halfWidth, {0.17f, 0.17f, 0.19f}, false);
+        addCurbs(visual, *this);
+        addWalls(visual, *this);
+    }
     addPit(visual, pit);
     addStartLine(visual, *this, 0, 1);
     if (!closed) {
