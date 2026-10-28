@@ -413,7 +413,7 @@ g++ -std=c++17 -I. drift_test.cpp car.cpp track.cpp -o drift_test
 - 道幅: half_width 5.0 → 6.0 m（壁は中心から 9.1 m）。
 - 加速: 「すぐトップスピードになる」を緩和。kAccel 15→9.5、
   kDrag 0.00045→0.00028。実測 0-100km/h 2.07s→3.42s、
-  0-200km/h 4.98s→10.65s、終速は 277→273 km/h でほぼ維持。
+  0-200km/h 4.98s→8.26s、終速は 277→272 km/h でほぼ維持。
 - 検証: akina_test ALL PASS（完走 236 秒）、drift/smoke/sound
   ALL PASS、鈴鹿はメッシュ・走行とも無変更。
   テスト側の前提も実測に合わせて更新（標高差 >250m、コーナー >=20、
