@@ -461,7 +461,10 @@ void Car::update(float dt, const DriveInput& input, const Track& track) {
             float depth = clampf((std::fabs(slipAngle) - 0.35f) / 0.65f, 0.0f, 1.0f);
             boost = 1.0f + (2.15f + 1.35f * depth - 1.0f) * restoreMix;
         }
-        force += input.throttle * kAccel * (1.0f - ratio * ratio) * boost;
+        // 加速の緩和（kAccel 9.5）はグリップ走行だけに効かせる。ドリフト中の
+        // 駆動力は従来の強さ（15 換算）を保ち、restoreMix で滑らかに繋ぐ。
+        float accelBase = kAccel + (15.0f - kAccel) * restoreMix;
+        force += input.throttle * accelBase * (1.0f - ratio * ratio) * boost;
     }
     force -= kDrag * speed * std::fabs(speed);
     if (std::fabs(speed) > 0.05f) {

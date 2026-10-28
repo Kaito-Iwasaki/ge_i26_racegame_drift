@@ -19,13 +19,13 @@ self-test autopilot: travelled 1932 m, maxLat 2.8 m
   ... s=1000 m at 22 s (201 km/h)
   ... s=2000 m at 45 s (65 km/h)
   ... s=3000 m at 78 s (75 km/h)
-  ... s=4000 m at 111 s (85 km/h)
-  ... s=5000 m at 143 s (193 km/h)
-  ... s=6000 m at 172 s (129 km/h)
-  ... s=7001 m at 217 s (149 km/h)
-full run: reached s=7546 / 7550 m in 236.4 s
+  ... s=4000 m at 110 s (85 km/h)
+  ... s=5000 m at 142 s (193 km/h)
+  ... s=6000 m at 171 s (129 km/h)
+  ... s=7001 m at 216 s (155 km/h)
+full run: reached s=7547 / 7550 m in 234.4 s
 [PASS] full run: finite state                               value=1.000
-[PASS] full run: reached the goal                           value=7546.455
-[PASS] full run: within 15 min                              value=236.436
+[PASS] full run: reached the goal                           value=7546.652
+[PASS] full run: within 15 min                              value=234.387
 
 ALL PASS

@@ -92,11 +92,28 @@ void run(Car& car, const Track& track, const DriveInput& input, float seconds) {
     for (int i = 0; i < steps; ++i) car.update(kDt, input, track);
 }
 
-// 目標速度まで直進加速する。
+// 目標速度まで加速する。円コースでは中心線を追いながら加速する
+// （2026-10-29: 加速を緩めた結果、無操舵だと助走距離が伸びて壁に当たって
+// から計測が始まるようになったため。直線コースでは従来と実質同じ）。
 void accelerateTo(Car& car, const Track& track, float targetSpeed) {
     DriveInput input;
     input.throttle = 1;
     for (int i = 0; i < 60 * 20 && car.speed < targetSpeed; ++i) {
+        float lookS = car.ground.s + 20.0f;
+        if (lookS > track.length) {
+            lookS = track.length;  // 円コースでは最終サンプル≒始点なのでこれで繋がる
+        }
+        int idx = 0;
+        float best = 1.0e30f;
+        for (int j = 0; j < static_cast<int>(track.samples.size()); ++j) {
+            float d = std::fabs(track.samples[j].s - lookS);
+            if (d < best) {
+                best = d;
+                idx = j;
+            }
+        }
+        float want = std::atan2(track.samples[idx].x - car.x, track.samples[idx].z - car.z);
+        input.steer = clampf(wrapPi(want - car.yaw) * 1.4f, -1.0f, 1.0f);
         car.update(kDt, input, track);
     }
 }
