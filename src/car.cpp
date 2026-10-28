@@ -6,10 +6,10 @@ namespace {
 
 constexpr float kMaxSpeed = 88.0f;      // 約 317 km/h
 constexpr float kMaxReverse = 9.0f;
-constexpr float kAccel = 15.0f;
+constexpr float kAccel = 9.5f;  // 2026-10-29: 「すぐトップスピードになる」を緩和。0-100 3.4s / 0-200 10.7s、終速は ~273 km/h を維持
 constexpr float kBrake = 30.0f;
 constexpr float kReverseAccel = 8.0f;
-constexpr float kDrag = 0.00045f;
+constexpr float kDrag = 0.00028f;
 constexpr float kRolling = 0.9f;
 constexpr float kWheelbase = 3.05f;
 constexpr float kSteerRate = 4.6f;       // グリップ走行の切り込みの速さ（応答性）

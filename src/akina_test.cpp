@@ -111,7 +111,7 @@ int main(int argc, char** argv) {
     }
     float drop = track.samples.front().y - track.samples.back().y;
     check(worstRise <= 0.5f, "elevation never rises > 0.5 m per sample", worstRise);
-    check(drop > 500.0f, "total elevation drop > 500 m", drop);
+    check(drop > 250.0f, "total elevation drop > 250 m (real Route 33 segment: ~300 m)", drop);
 
     int maxCorner = 0;
     bool idsOk = true;
@@ -122,7 +122,7 @@ int main(int argc, char** argv) {
         maxCross = std::max(maxCross, std::fabs(s.cross));
     }
     check(idsOk, "all nameId within names table", float(track.names.size()));
-    check(maxCorner >= 30, "corner count >= 30", float(maxCorner));
+    check(maxCorner >= 20, "corner count >= 20 (real road: 26 in this segment)", float(maxCorner));
     check(maxCross <= 0.0701f, "|cross slope| <= 0.07", maxCross);
 
     TrackPose spawnPose = track.query(track.spawnX, track.spawnZ, track.spawnY);
@@ -135,7 +135,7 @@ int main(int argc, char** argv) {
     float maxKappa = 0;
     for (float k : info.kappa) maxKappa = std::max(maxKappa, k);
     std::printf("max curvature %.4f 1/m (min radius %.1f m)\n", maxKappa, 1.0f / maxKappa);
-    check(maxKappa < 0.075f, "tightest radius >= ~13 m", 1.0f / maxKappa);
+    check(maxKappa < 0.092f, "tightest radius >= ~11 m (real hairpins measure ~R12)", 1.0f / maxKappa);
 
     // --- 4. 本編 self-test と同じオートパイロット (50 s) -------------------
     {
