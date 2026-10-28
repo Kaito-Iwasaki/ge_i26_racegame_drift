@@ -132,6 +132,7 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
             driftCounterAge = 10.0f;
             slipEntryHold = 0.0f;
             settledHold = 0.0f;
+            gripRestore = 0.0f;
         }
     }
 
@@ -195,6 +196,17 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
     // 二状態をはっきり分けるのが狙い。抜けるまでは滑り続ける。
     if (drifting) {
         gripTarget = std::min(gripTarget, kGripDrift);
+    }
+
+    // ドリフト終了直後は、横グリップの上限をドリフト側から通常へ
+    // 約0.9秒かけて滑らかに戻す（クロスフェード）。状態が切り替わった
+    // 瞬間にグリップが跳ね上がると、残っていた横滑りが一気に消えて
+    // 進行方向が「ガクッ」と跳ぶため。特に、失速して速度の下限で
+    // 終了したときは滑りが深いまま残っているので効きが大きい。
+    if (!drifting && gripRestore > 0.0f) {
+        float cap = kGripDrift + (kGripAsphalt - kGripDrift) * (1.0f - gripRestore);
+        if (gripTarget > cap) gripTarget = cap;
+        gripRestore = std::max(0.0f, gripRestore - dt / 0.9f);
     }
 
     // グリップは落とすとき素早く、戻すとき少し遅く。戻しを即座にすると
@@ -286,8 +298,8 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
     // アクセルで姿勢を保ちながら速度も乗せ続けられるバランスにする。
     const float slipAbs = std::fabs(std::atan2(vL, std::fabs(vF) + 0.001f));
     if (speedNow > 1.0f) {
-        float scrubRate = drifting ? 0.09f : 0.55f;
-        float scrubGain = drifting ? 0.04f : 0.35f;
+        float scrubRate = drifting ? 0.09f : (0.55f - 0.46f * gripRestore);
+        float scrubGain = drifting ? 0.04f : (0.35f - 0.31f * gripRestore);
         const float scrub = 1.0f - std::exp(-scrubRate * slipAbs * dt * 4.0f);
         vF -= vF * scrub * scrubGain;
     }
@@ -326,6 +338,7 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
                 drifting = false;
                 driftRecovery = 0.0f;
                 settledHold = 0.0f;
+                gripRestore = 1.0f;  // 物理量はクロスフェードで戻す（下記）
             }
         } else {
             settledHold = 0.0f;
@@ -370,6 +383,7 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
             speedNow < 3.5f) {
             drifting = false;
             driftRecovery = 0.0f;
+            gripRestore = 1.0f;  // 物理量はクロスフェードで戻す（下記）
         }
     }
     if (drifting) {
@@ -396,9 +410,12 @@ void Car::update(float dt, const DriveInput& input, const Track& track) {
 
     // ドリフト中は切れ角を大きく広げ、戻しも速くする。ステアリングで
     // 車の向きをぐっと傾けたり、カウンターで立て直したりするための幅。
-    float steerLimit = maxSteerAt(speed) * (drifting ? 3.9f : 1.0f);
+    // 終了直後は gripRestore の分だけドリフト側の値を残し、切れ角や
+    // 駆動ブーストが一段で切り替わって「ガクッ」とならないようにする。
+    const float restoreMix = drifting ? 1.0f : gripRestore;
+    float steerLimit = maxSteerAt(speed) * (1.0f + 2.9f * restoreMix);
     float target = clampf(input.steer, -1.0f, 1.0f) * steerLimit;
-    float step = (drifting ? kSteerRateDrift : kSteerRate) * dt;
+    float step = (restoreMix > 0.0f ? kSteerRateDrift : kSteerRate) * dt;
     steerAngle += clampf(target - steerAngle, -step, step);
     steerAngle = clampf(steerAngle, -0.6f, 0.6f);
 
@@ -419,7 +436,7 @@ void Car::update(float dt, const DriveInput& input, const Track& track) {
         // 通常ブレーキほどは止まらないので、滑りながら速度を保てる。
         // 突入時はしっかり落とし、いったんドリフトに入ったら減速を弱めて
         // 「引きっぱなしでも失速しすぎない」ようにする。
-        force -= drifting ? 2.2f : kHandbrakeDecel;
+        force -= kHandbrakeDecel - (kHandbrakeDecel - 2.2f) * restoreMix;
     } else if (input.brake > 0.05f && !reversing) {
         force -= input.brake * kBrake * (speed >= 0 ? 1.0f : -1.0f);
     } else if (reversing) {
@@ -432,9 +449,9 @@ void Car::update(float dt, const DriveInput& input, const Track& track) {
         // cos(角度) の分だけ落ちるので、深さに応じてさらに上乗せして
         // 打ち消す（深くても速い、を両立させる）。
         float boost = 1.0f;
-        if (drifting) {
+        if (restoreMix > 0.0f) {
             float depth = clampf((std::fabs(slipAngle) - 0.35f) / 0.65f, 0.0f, 1.0f);
-            boost = 2.15f + 1.35f * depth;
+            boost = 1.0f + (2.15f + 1.35f * depth - 1.0f) * restoreMix;
         }
         force += input.throttle * kAccel * (1.0f - ratio * ratio) * boost;
     }
