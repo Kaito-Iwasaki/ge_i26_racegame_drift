@@ -283,6 +283,69 @@ def main():
         if p["s"] > length - 30.0:
             p["nameId"] = name_ids["Akina Goal"]
 
+    # --- running direction reversed (user request, 2026-10-28) -----------
+    # The course is designed Ikaho -> south-west, but it is RUN south-west
+    # -> Ikaho. Reverse the samples, mirror the elevation so it stays a
+    # downhill in the running direction, flip camber signs, and fix the
+    # names that depend on travel order (start/goal, checkpoint countdown,
+    # hairpin numbering). Corner ids are renumbered in travel order.
+    import re as _re
+    _ymax = max(p["y"] for p in samples)
+    _ymin = min(p["y"] for p in samples)
+    samples.reverse()
+    for p in samples:
+        p["y"] = (_ymax + _ymin) - p["y"]
+        p["cross"] = -p["cross"]
+        p["name"] = names[p["nameId"]]
+    _cum = [0.0]
+    for a, b in zip(samples, samples[1:]):
+        _cum.append(_cum[-1] + math.hypot(b["x"] - a["x"], b["z"] - a["z"]))
+    for i, p in enumerate(samples):
+        p["s"] = _cum[i]
+        a = samples[max(0, i - 1)]
+        b = samples[min(len(samples) - 1, i + 1)]
+        p["heading"] = math.atan2(b["x"] - a["x"], b["z"] - a["z"])
+    for p in samples:
+        if p["name"] == "Akina Start":
+            p["name"] = "Akina Goal"
+        elif p["name"] == "Akina Goal":
+            p["name"] = "Akina Start"
+    _cp_seen = []
+    for p in samples:
+        if p["name"].startswith("Check Point") and p["name"] not in _cp_seen:
+            _cp_seen.append(p["name"])
+    _cp_map = {old: f"Check Point {3 - i}" for i, old in enumerate(_cp_seen)}
+    for _fam in ("Takane Hairpin", "Final Hairpin", "Nagamine Hairpin"):
+        _seen = []
+        for p in samples:
+            if _re.match(rf"^{_fam} \d+$", p["name"]) and p["name"] not in _seen:
+                _seen.append(p["name"])
+        _mp = {old: f"{_fam} {i + 1}" for i, old in enumerate(_seen)}
+        for p in samples:
+            if p["name"] in _mp:
+                p["name"] = _mp[p["name"]]
+    for p in samples:
+        if p["name"] in _cp_map:
+            p["name"] = _cp_map[p["name"]]
+    _cmap = {}
+    _nxt = 1
+    for p in samples:
+        c = p["corner"]
+        if c == 0:
+            continue
+        if c not in _cmap:
+            _cmap[c] = _nxt
+            _nxt += 1
+        p["corner"] = _cmap[c]
+    names = ["Akina Start", "Check Point 3", "Check Point 2", "Check Point 1", "Akina Goal"]
+    for p in samples:
+        if p["name"] not in names:
+            names.append(p["name"])
+    name_ids = {nm: i for i, nm in enumerate(names)}
+    for p in samples:
+        p["nameId"] = name_ids[p["name"]]
+        del p["name"]
+
     # spawn: 10 m into the course, on sample ~2-3
     spawn = samples[2]
     spawn_yaw = samples[2]["heading"]
@@ -291,6 +354,8 @@ def main():
         f.write("# Akina Downhill - Mt. Haruna (Harunasan) touge, after the Initial D course map\n")
         f.write("# Point-to-point downhill: NOT a loop. Requires the 'closed 0' support in track.cpp.\n")
         f.write("# Sections (from the route map): total ~7250 m = Sec.4 1850 m + Sec.3 1800 m + Sec.2 1500 m + Sec.1 2100 m\n")
+        f.write("# Running direction is REVERSED vs the design (user request): start at the\n")
+        f.write("# south-western end, finish at Ikaho; elevation mirrored to stay a downhill.\n")
         f.write("# Elevation drop is a designed profile in the spirit of the pass (game physics has no slope gravity).\n")
         f.write("origin 36.471300 138.873000\n")
         f.write("title Akina Downhill\n")

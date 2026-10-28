@@ -543,16 +543,60 @@ void Car::update(float dt, const DriveInput& input, const Track& track) {
 }
 
 void buildCarBody(CpuMesh& mesh) {
-    const Vec3 red{0.72f, 0.08f, 0.09f};
-    const Vec3 dark{0.06f, 0.06f, 0.07f};
-    const Vec3 carbon{0.12f, 0.12f, 0.13f};
-    mesh.addBox({-0.88f, 0.32f, -2.05f}, {0.88f, 0.62f, 2.05f}, red);
-    mesh.addBox({-0.72f, 0.62f, -0.55f}, {0.72f, 1.05f, 1.05f}, red);
-    mesh.addBox({-0.62f, 0.78f, -0.35f}, {0.62f, 1.02f, 0.9f}, dark);
-    mesh.addBox({-0.7f, 0.32f, 1.7f}, {0.7f, 0.5f, 2.25f}, red);
-    mesh.addBox({-0.95f, 0.26f, 1.95f}, {0.95f, 0.36f, 2.35f}, carbon);
-    mesh.addBox({-0.86f, 0.85f, -2.2f}, {0.86f, 1.0f, -1.85f}, carbon);
-    mesh.addBox({-0.15f, 0.95f, -2.05f}, {0.15f, 1.15f, -1.9f}, carbon);
+    // AE86（スプリンタートレノ）風の3ドアハッチバック。
+    // 白×黒のパンダツートン、角ばったウェッジシェイプ、寝たハッチガラス、
+    // 黒いリアガーニッシュとバンパーが要点。前方が +z。
+    const Vec3 white{0.92f, 0.92f, 0.90f};
+    const Vec3 black{0.05f, 0.05f, 0.06f};
+    const Vec3 glass{0.07f, 0.09f, 0.12f};
+    const Vec3 lidGray{0.78f, 0.78f, 0.76f};
+    const Vec3 tailRed{0.70f, 0.05f, 0.06f};
+    const Vec3 amber{0.85f, 0.45f, 0.08f};
+    const Vec3 steel{0.25f, 0.25f, 0.27f};
+
+    // 下半分は黒帯（パンダ塗装）: バンパーと一体で車体を一周する。
+    mesh.addBox({-0.845f, 0.24f, -2.02f}, {0.845f, 0.46f, 2.06f}, black);
+    // 白い上半分（ボンネットは平ら、ベルトライン 0.66）。
+    mesh.addBox({-0.82f, 0.44f, -1.98f}, {0.82f, 0.66f, 2.04f}, white);
+    // 前後バンパー（黒、少し張り出し）。
+    mesh.addBox({-0.85f, 0.28f, 2.02f}, {0.85f, 0.50f, 2.16f}, black);
+    mesh.addBox({-0.85f, 0.26f, -2.16f}, {0.85f, 0.48f, -2.00f}, black);
+    // フロントウインカー。
+    mesh.addBox({0.52f, 0.36f, 2.10f}, {0.78f, 0.44f, 2.17f}, amber);
+    mesh.addBox({-0.78f, 0.36f, 2.10f}, {-0.52f, 0.44f, 2.17f}, amber);
+    // リトラクタブルライト（閉じた状態）: 蓋の輪郭を黒い溝＋灰色の蓋で描く。
+    mesh.addBox({0.26f, 0.645f, 1.76f}, {0.78f, 0.665f, 2.03f}, black);
+    mesh.addBox({-0.78f, 0.645f, 1.76f}, {-0.26f, 0.665f, 2.03f}, black);
+    mesh.addBox({0.28f, 0.66f, 1.78f}, {0.76f, 0.685f, 2.01f}, lidGray);
+    mesh.addBox({-0.76f, 0.66f, 1.78f}, {-0.28f, 0.685f, 2.01f}, lidGray);
+
+    // グリーンハウス: 傾斜したガラス面＋白いルーフ。
+    // フロントガラス
+    mesh.addQuad({-0.63f, 0.65f, 1.02f}, {0.63f, 0.65f, 1.02f},
+                 {0.57f, 1.04f, 0.42f}, {-0.57f, 1.04f, 0.42f},
+                 {0, 0.84f, 0.55f}, glass);
+    // ルーフ
+    mesh.addBox({-0.615f, 1.03f, -0.62f}, {0.615f, 1.10f, 0.47f}, white);
+    // ハッチガラス（急角度で寝る）
+    mesh.addQuad({-0.57f, 1.04f, -0.60f}, {0.57f, 1.04f, -0.60f},
+                 {0.63f, 0.66f, -1.60f}, {-0.63f, 0.66f, -1.60f},
+                 {0, 0.93f, -0.36f}, glass);
+    // サイドガラス（左右）
+    mesh.addQuad({0.645f, 0.65f, 1.00f}, {0.645f, 0.65f, -1.56f},
+                 {0.585f, 1.035f, -0.57f}, {0.585f, 1.035f, 0.40f},
+                 {1, 0.1f, 0}, glass);
+    mesh.addQuad({-0.645f, 0.65f, -1.56f}, {-0.645f, 0.65f, 1.00f},
+                 {-0.585f, 1.035f, 0.40f}, {-0.585f, 1.035f, -0.57f},
+                 {-1, 0.1f, 0}, glass);
+    // ドアミラー（黒い角型）。
+    mesh.addBox({0.80f, 0.82f, 0.90f}, {0.95f, 0.93f, 1.02f}, black);
+    mesh.addBox({-0.95f, 0.82f, 0.90f}, {-0.80f, 0.93f, 1.02f}, black);
+
+    // リア: 黒ガーニッシュ＋赤テールランプ＋マフラー。
+    mesh.addBox({-0.79f, 0.58f, -2.00f}, {0.79f, 0.82f, -1.93f}, black);
+    mesh.addBox({0.30f, 0.63f, -2.03f}, {0.77f, 0.77f, -1.96f}, tailRed);
+    mesh.addBox({-0.77f, 0.63f, -2.03f}, {-0.30f, 0.77f, -1.96f}, tailRed);
+    mesh.addBox({0.48f, 0.14f, -2.20f}, {0.68f, 0.24f, -2.02f}, steel);
 }
 
 void buildCarWheel(CpuMesh& mesh) {
@@ -560,7 +604,7 @@ void buildCarWheel(CpuMesh& mesh) {
     const float radius = 0.34f;
     const float halfW = 0.15f;
     const Vec3 tire{0.07f, 0.07f, 0.08f};
-    const Vec3 rim{0.72f, 0.74f, 0.76f};
+    const Vec3 rim{0.13f, 0.13f, 0.14f};  // 黒いホイール（ワタナベ風）
     for (int i = 0; i < seg; ++i) {
         float a0 = float(i) / float(seg) * 6.2831853f;
         float a1 = float(i + 1) / float(seg) * 6.2831853f;
@@ -590,7 +634,7 @@ void buildCarWheel(CpuMesh& mesh) {
 
 void buildCarShadow(CpuMesh& mesh) {
     const Vec3 ink{0.02f, 0.02f, 0.025f};
-    mesh.addQuad({-1.05f, 0, -2.1f}, {1.05f, 0, -2.1f}, {1.05f, 0, 2.15f}, {-1.05f, 0, 2.15f}, {0, 1, 0}, ink);
+    mesh.addQuad({-1.02f, 0, -2.28f}, {1.02f, 0, -2.28f}, {1.02f, 0, 2.24f}, {-1.02f, 0, 2.24f}, {0, 1, 0}, ink);
 }
 
 Mat4 carModelMatrix(const Car& car, float pitch, float roll) {

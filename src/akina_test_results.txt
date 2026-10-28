@@ -1,6 +1,6 @@
-loaded ../assets/track/akina.txt: samples=1814 length=7248.4 closed=0 title=Akina Downhill
+loaded ../assets/track/akina.txt: samples=1814 length=7248.5 closed=0 title=Akina Downhill
 [PASS] open course (closed == 0)                            value=0.000
-[PASS] length ~7552 m                                       value=7248.446
+[PASS] length ~7552 m                                       value=7248.455
 [PASS] sample count >= 1800                                 value=1814.000
 [PASS] sample spacing 3..5 m (min/max)                      value=4.036
 [PASS] elevation never rises > 0.5 m per sample             value=0.000
@@ -9,23 +9,23 @@ loaded ../assets/track/akina.txt: samples=1814 length=7248.4 closed=0 title=Akin
 [PASS] corner count >= 30                                   value=34.000
 [PASS] |cross slope| <= 0.07                                value=0.064
 [PASS] spawn is on the road                                 value=0.000
-[PASS] goal sample s ~ length                               value=7248.446
+[PASS] goal sample s ~ length                               value=7248.455
 max curvature 0.0590 1/m (min radius 17.0 m)
 [PASS] tightest radius >= ~13 m                             value=16.959
-self-test autopilot: travelled 1430 m, maxLat 3.8 m
+self-test autopilot: travelled 1479 m, maxLat 8.1 m
 [PASS] self-test autopilot: finite state                    value=1.000
-[PASS] self-test autopilot: travelled >= 1200 m             value=1429.583
-[PASS] self-test autopilot: stays near course               value=3.757
-  ... s=1000 m at 24 s (144 km/h)
-  ... s=2000 m at 46 s (134 km/h)
-  ... s=3000 m at 70 s (161 km/h)
-  ... s=4000 m at 101 s (78 km/h)
-  ... s=5000 m at 131 s (201 km/h)
-  ... s=6000 m at 151 s (169 km/h)
-  ... s=7000 m at 182 s (198 km/h)
-full run: reached s=7245 / 7248 m in 186.8 s
+[PASS] self-test autopilot: travelled >= 1200 m             value=1479.355
+[PASS] self-test autopilot: stays near course               value=8.100
+  ... s=1000 m at 32 s (82 km/h)
+  ... s=2000 m at 53 s (193 km/h)
+  ... s=3000 m at 77 s (72 km/h)
+  ... s=4000 m at 113 s (140 km/h)
+  ... s=5001 m at 137 s (149 km/h)
+  ... s=6000 m at 160 s (159 km/h)
+  ... s=7000 m at 182 s (129 km/h)
+full run: reached s=7245 / 7248 m in 187.6 s
 [PASS] full run: finite state                               value=1.000
-[PASS] full run: reached the goal                           value=7245.219
-[PASS] full run: within 15 min                              value=186.815
+[PASS] full run: reached the goal                           value=7244.817
+[PASS] full run: within 15 min                              value=187.565
 
 ALL PASS
