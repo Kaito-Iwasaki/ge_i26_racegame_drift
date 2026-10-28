@@ -1,0 +1,33 @@
+loaded ../assets/track/akina.txt: samples=2471 length=9859.4 closed=0 title=Akina Downhill
+[PASS] open course (closed == 0)                            value=0.000
+[PASS] length ~9859 m                                       value=9859.410
+[PASS] sample count >= 1800                                 value=2471.000
+[PASS] sample spacing 3..5 m (min/max)                      value=4.001
+[PASS] elevation never rises > 0.5 m per sample             value=0.000
+[PASS] total elevation drop > 500 m                         value=747.566
+[PASS] all nameId within names table                        value=27.000
+[PASS] corner count >= 30                                   value=59.000
+[PASS] |cross slope| <= 0.07                                value=0.068
+[PASS] spawn is on the road                                 value=0.000
+[PASS] goal sample s ~ length                               value=9859.410
+max curvature 0.0740 1/m (min radius 13.5 m)
+[PASS] tightest radius >= ~13 m                             value=13.515
+self-test autopilot: travelled 1253 m, maxLat 8.1 m
+[PASS] self-test autopilot: finite state                    value=1.000
+[PASS] self-test autopilot: travelled >= 1200 m             value=1252.554
+[PASS] self-test autopilot: stays near course               value=8.100
+  ... s=1000 m at 37 s (107 km/h)
+  ... s=2000 m at 72 s (79 km/h)
+  ... s=3000 m at 113 s (72 km/h)
+  ... s=4000 m at 155 s (95 km/h)
+  ... s=5000 m at 189 s (111 km/h)
+  ... s=6000 m at 226 s (90 km/h)
+  ... s=7000 m at 259 s (154 km/h)
+  ... s=8000 m at 296 s (117 km/h)
+  ... s=9000 m at 332 s (122 km/h)
+full run: reached s=9856 / 9859 m in 358.5 s
+[PASS] full run: finite state                               value=1.000
+[PASS] full run: reached the goal                           value=9856.154
+[PASS] full run: within 15 min                              value=358.490
+
+ALL PASS
