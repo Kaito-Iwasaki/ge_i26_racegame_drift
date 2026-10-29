@@ -55,6 +55,8 @@ struct Car {
 };
 
 void buildCarBody(CpuMesh& mesh);
+// ブレーキ時だけ重ねて描く明るい赤のテールランプ（車体メッシュのテールより少し外側）。
+void buildCarBrakeLights(CpuMesh& mesh);
 void buildCarWheel(CpuMesh& mesh);
 void buildCarShadow(CpuMesh& mesh);
 Mat4 carModelMatrix(const Car& car, float pitch, float roll);

@@ -468,28 +468,78 @@ void addGround(CpuMesh& mesh, const Track& track, Vec3 color) {
 }
 
 // オープンコース（山道）用: 路面が谷底の平面から浮いて見えないよう、
-// 路肩の外側に沿って斜面を付ける。幅は折り返し区間で隣の路面に
-// かぶりにくい程度に抑え、外側へ緩く下げる。
+// 路肩の外側に沿って斜面を付ける。外側へ緩く下げる。
+// ヘアピンでは別の脚の路面が斜面の幅（最大 55 m）の中に入る。その路面より
+// 斜面が高いと路面を覆い隠してしまうので、サンプルごとに斜面の外端を
+// 「別区間の路面に届く手前」までに縮める（高さの関係で路面の下を通る場合は縮めない）。
 void addMountain(CpuMesh& mesh, const Track& track) {
+    const int n = static_cast<int>(track.samples.size());
     const int segs = segmentCount(track);
     const float inner = track.halfWidth + track.curbWidth + track.runoff;
-    const float outer = inner + 55.0f;
+    const float fullWidth = 55.0f;
+    const float fullOuter = inner + fullWidth;
+    const float startDrop = 2.2f;
+    const float gradient = (9.7f - 2.2f) / fullWidth;  // 外側へ進む 1 m あたりの下がり
+    const float footprint = inner;                      // 別区間の路面＋路肩の半幅
+    const float ownSkip = 25.0f;                        // 自分の近傍（同じ脚）は判定しない (m)
     const Vec3 base{0.13f, 0.30f, 0.12f};
+
     for (int side = -1; side <= 1; side += 2) {
         float sign = float(side);
+        const float edge = sign * (track.halfWidth + track.curbWidth);
+        std::vector<float> outerLat(n, fullOuter);
+        for (int i = 0; i < n; ++i) {
+            const TrackSample& si = track.samples[i];
+            Vec3 r = horizontalRight(track, i) * sign;
+            float edgeY = si.y + edge * si.cross;
+            float limit = fullOuter;
+            for (int j = 0; j < n; ++j) {
+                const TrackSample& sj = track.samples[j];
+                if (std::fabs(sj.s - si.s) < ownSkip) {
+                    continue;
+                }
+                float dx = sj.x - si.x;
+                float dz = sj.z - si.z;
+                float a = dx * r.x + dz * r.z;  // 斜面の向き（外側）への距離
+                if (a <= 0.0f || a > fullOuter + footprint) {
+                    continue;
+                }
+                float b2 = dx * dx + dz * dz - a * a;  // 向きに直交する距離の二乗
+                if (b2 >= footprint * footprint) {
+                    continue;
+                }
+                // 相手の路面（半径 footprint の円で近似）に斜面が入り始める位置
+                float stop = a - std::sqrt(footprint * footprint - b2);
+                float slopeY = edgeY - startDrop - std::max(0.0f, stop - inner) * gradient;
+                // 相手の路面と同じか高いなら覆ってしまう。1.5 m の余裕を見て縮める。
+                if (slopeY > sj.y - 1.5f) {
+                    limit = std::min(limit, std::max(stop, inner));
+                }
+            }
+            outerLat[i] = limit;
+        }
+        // 区間ごとに外端がギザギザしないよう、前後 3 サンプルの最小に揃える。
+        std::vector<float> smooth(n);
+        for (int i = 0; i < n; ++i) {
+            float m = outerLat[i];
+            for (int k = std::max(0, i - 3); k <= std::min(n - 1, i + 3); ++k) {
+                m = std::min(m, outerLat[k]);
+            }
+            smooth[i] = m;
+        }
         for (int i = 0; i < segs; ++i) {
             int j = nextIndex(track, i);
             auto pointAt = [&](int idx, float lat, float drop) {
                 Vec3 p = onRoad(track, idx, lat);
                 const TrackSample& smp = track.samples[idx];
-                float edge = sign * (track.halfWidth + track.curbWidth);
                 p.y = smp.y + edge * smp.cross - drop;
                 return p;
             };
-            Vec3 a = pointAt(i, sign * inner, 2.2f);
-            Vec3 b = pointAt(i, sign * outer, 9.7f);
-            Vec3 c = pointAt(j, sign * outer, 9.7f);
-            Vec3 d = pointAt(j, sign * inner, 2.2f);
+            auto dropAt = [&](int idx) { return startDrop + (smooth[idx] - inner) * gradient; };
+            Vec3 a = pointAt(i, sign * inner, startDrop);
+            Vec3 b = pointAt(i, sign * smooth[i], dropAt(i));
+            Vec3 c = pointAt(j, sign * smooth[j], dropAt(j));
+            Vec3 d = pointAt(j, sign * inner, startDrop);
             float shade = 0.92f + 0.10f * float((i * 7) % 5) / 5.0f;
             mesh.addQuad(a, b, c, d, {0, 1, 0}, base * shade);
         }
