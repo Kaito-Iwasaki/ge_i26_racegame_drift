@@ -349,6 +349,7 @@ void resetRace(App& app) {
     app.car.reset(app.track);
     app.race = Race{};
     app.countdown.reset();
+    app.sound.resetBgm();
     app.accumulator = 0;
     app.smoke.clear();
     app.surfaceEffects.clear();
@@ -729,7 +730,8 @@ void frame(void* userdata) {
     // 写像だとギア境界でピッチが跳ねたり往復したりするため。
     SoundState soundState = makeSoundState(
         app.car.speed, app.car.groundSpeed(), input.throttle, input.brake,
-        input.handbrake, app.car.drifting, std::fabs(app.car.slipAngle), app.paused);
+        input.handbrake, app.car.drifting, std::fabs(app.car.slipAngle), app.paused,
+        app.countdown.remaining <= 0.0);
     soundState.rpm01 = app.engineVoice.update(std::fabs(app.car.speed), input.throttle,
                                               app.car.drifting, app.paused, float(elapsed));
     app.sound.update(soundState);

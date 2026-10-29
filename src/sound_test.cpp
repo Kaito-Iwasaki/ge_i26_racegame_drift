@@ -362,6 +362,26 @@ int main() {
         renderBuf(bgmOff, 1.0f);
         check(dsp.bgmVoice.pos == posBefore, "bgm: position frozen while off",
               float(dsp.bgmVoice.pos - posBefore));
+        // Countdown is silent and does not advance the BGM voice; GO enables it.
+        dsp.resetBgm();
+        SoundState countdown = makeSoundState(0, 0, 0.7f, 0, false, false, 0, false, false);
+        check(countdown.bgm == 0 && countdown.running && countdown.load > 0,
+              "bgm: countdown mutes music but keeps engine", countdown.bgm);
+        countdown.running = false; // Isolate music in this DSP test.
+        auto [rmsCountdown, finCountdown] = renderBuf(countdown, 1.0f);
+        check(finCountdown && rmsCountdown < .02f && dsp.bgmVoice.pos == 0,
+              "bgm: countdown silent at the start position", rmsCountdown);
+        SoundState go = makeSoundState(0, 0, 0, 0, false, false, 0, false, true);
+        check(go.bgm == 1, "bgm: starts at GO", go.bgm);
+        go.running = false;
+        renderBuf(go, 0.503f);
+        check(dsp.bgmVoice.gainSm > 0 && dsp.bgmVoice.pos != 0,
+              "bgm: advances after GO", dsp.bgmVoice.gainSm);
+        dsp.resetBgm();
+        check(dsp.bgmVoice.pos == 0 && dsp.bgmVoice.gainSm == 0,
+              "bgm: reset rewinds and silences", dsp.bgmVoice.gainSm);
+        check(makeSoundState(0,0,0,0,false,false,0,true,true).bgm == 0,
+              "bgm: pause after GO mutes", 0);
         // makeSoundState 側の配線：走行中は流れ、ポーズでは止まる。
         check(makeSoundState(20, 20, 0.5f, 0, false, false, 0.02f, false).bgm == 1.0f,
               "bgm: on while driving", 1.0f);

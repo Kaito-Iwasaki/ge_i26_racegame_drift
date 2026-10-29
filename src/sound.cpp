@@ -198,6 +198,13 @@ void GameSound::update(const SoundState& state) {
     SDL_UnlockAudioDevice(static_cast<SDL_AudioDeviceID>(deviceId_));
 }
 
+void GameSound::resetBgm() {
+    if (ready_) SDL_LockAudioDevice(static_cast<SDL_AudioDeviceID>(deviceId_));
+    target.bgm = 0.0f;
+    dsp.resetBgm();
+    if (ready_) SDL_UnlockAudioDevice(static_cast<SDL_AudioDeviceID>(deviceId_));
+}
+
 void GameSound::shutdown() {
     if (!ready_) {
         return;

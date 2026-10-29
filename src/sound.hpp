@@ -112,7 +112,7 @@ struct EngineVoice {
 // rpm01 はここでも埋めるが、main 側は EngineVoice の値で上書きする
 // （ギアの状態を持てるのは EngineVoice だけなので）。
 inline SoundState makeSoundState(float speed, float groundSpeed, float throttle, float brake,
-                                 bool handbrake, bool drifting, float slipAbs, bool paused) {
+                                 bool handbrake, bool drifting, float slipAbs, bool paused, bool raceStarted = true) {
     using namespace sounddetail;
     SoundState state;
     state.running = true;
@@ -122,7 +122,7 @@ inline SoundState makeSoundState(float speed, float groundSpeed, float throttle,
     }
     state.rpm01 = engineRpm01(std::fabs(speed), throttle);
     state.load = clamp01(throttle);
-    state.bgm = 1.0f;  // 走行中は BGM を流す（ポーズ時は上の早期リターンで 0）
+    state.bgm = raceStarted ? 1.0f : 0.0f;  // GOから再生、ポーズ中は上の早期リターンで 0
 
     // タイヤ音：ブレーキ、サイドブレーキ、ドリフトのうち一番強いものを採用。
     float tire = 0.0f;
@@ -224,6 +224,8 @@ struct SoundDsp {
     // BGM（sound.cpp が bgm.ogg をデコードして入れる。モノラル化済み）。
     SampleLoop bgmSample;
     SampleVoice bgmVoice;
+
+    void resetBgm() { bgmVoice = SampleVoice{}; }
 
     float nextNoise() {
         noiseSeed = noiseSeed * 1664525u + 1013904223u;
@@ -369,6 +371,7 @@ public:
     bool init();
     void shutdown();
     void update(const SoundState& state);
+    void resetBgm();  // Stop and rewind safely before a new countdown.
     bool ready() const { return ready_; }
 
     // オーディオコールバックから使う内部状態（直接触らない）
