@@ -7,6 +7,9 @@
 //                サンプルが無い場合は倍音＋点火パルスの合成音。
 //   タイヤ／ブレーキ音: ドリフト音の録音ループ。ドリフト・サイド・強ブレーキで鳴る。
 //                サンプルが無い場合は帯域ノイズ＋金属音の合成。
+//   BGM          : assets/sound/bgm.ogg をデコードしたものをシームレスに
+//                ループ再生する（sound.cpp が stb_vorbis で読み込む）。
+//                ポーズ中はフェードアウトして再生位置も止まる。
 //
 // このヘッダは SDL に依存しない純粋な DSP とパラメータ変換だけを持つ
 // （単体テストがそのままコンパイルできる）。SDL のデバイス出力と WAV の
@@ -33,6 +36,7 @@ struct SoundState {
     float tire = 0;        // タイヤ音（ブレーキ／ドリフト）の強さ
     float tirePitch01 = 0; // タイヤ音の高さ。速度で変わる
     float squeal = 0;      // ブレーキ鳴き（金属音）の強さ
+    float bgm = 0;         // BGM の目標音量 0..1（0 でフェードアウト＋停止）
 };
 
 // 速度から「ギアつきの回転数」を作る。ギアが上がるたびに回転数が落ちる、
@@ -118,6 +122,7 @@ inline SoundState makeSoundState(float speed, float groundSpeed, float throttle,
     }
     state.rpm01 = engineRpm01(std::fabs(speed), throttle);
     state.load = clamp01(throttle);
+    state.bgm = 1.0f;  // 走行中は BGM を流す（ポーズ時は上の早期リターンで 0）
 
     // タイヤ音：ブレーキ、サイドブレーキ、ドリフトのうち一番強いものを採用。
     float tire = 0.0f;
@@ -215,6 +220,10 @@ struct SoundDsp {
     SampleVoice engineIdleVoice;
     SampleVoice engineMainVoice;
     SampleVoice driftVoice;
+
+    // BGM（sound.cpp が bgm.ogg をデコードして入れる。モノラル化済み）。
+    SampleLoop bgmSample;
+    SampleVoice bgmVoice;
 
     float nextNoise() {
         noiseSeed = noiseSeed * 1664525u + 1013904223u;
@@ -332,7 +341,19 @@ struct SoundDsp {
             squeal = sq * squealSm * 0.16f;
             }
 
-            float mix = (engine + tire + squeal) * 0.8f;
+            // --- BGM ------------------------------------------------------
+            // 等速再生のループ。フェードはゆっくり（ポーズ開閉で音量が
+            // 暴れないように）。フェードアウトし切ったら再生位置も止める
+            // （ポーズを解いたときに曲が先に進んでいる事故を防ぐ）。
+            float bgm = 0.0f;
+            if (!bgmSample.empty()) {
+                const float cBgm = smoothCoeff(2.5f, sampleRate);
+                if (target.bgm > 0.0f || bgmVoice.gainSm > 0.002f) {
+                    bgm = bgmVoice.next(bgmSample, target.bgm * 0.55f, 1.0, cBgm);
+                }
+            }
+
+            float mix = (engine + tire + squeal) * 0.8f + bgm;
             // 簡易リミッタ。割れる前に止める。
             if (mix > 0.95f) mix = 0.95f;
             if (mix < -0.95f) mix = -0.95f;

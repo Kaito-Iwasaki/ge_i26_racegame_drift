@@ -2,12 +2,31 @@
 
 #include <SDL.h>
 
+#include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
 
+// Ogg Vorbis デコーダ（stb_vorbis）。宣言だけを取り込み、実装は
+// stb_vorbis_impl.cpp 側にある。SDL_mixer は使わない方針のまま、
+// BGM の OGG だけをここでデコードする。
+#define STB_VORBIS_HEADER_ONLY
+#include "stb_vorbis.c"
+
 namespace {
+
+// assets/sound/ の候補ディレクトリ。実行ファイルの隣を最優先にする
+// （loadSamples のコメント参照）。
+std::vector<std::string> soundDirs() {
+    std::vector<std::string> dirs = {"assets/sound/", "../assets/sound/", "/assets/sound/"};
+    if (const char* basePath = SDL_GetBasePath()) {
+        dirs.insert(dirs.begin(), std::string(basePath) + "assets/sound/");
+        SDL_free(const_cast<char*>(basePath));
+    }
+    return dirs;
+}
 
 // WAV を読み、デバイスのサンプルレートのモノラル float に変換する。
 // SDL 本体の機能だけで足りるので SDL_mixer は使わない。
@@ -52,17 +71,58 @@ bool loadWavMono(const std::string& path, SampleLoop& out, int targetRate) {
     return frames > 0;
 }
 
+// BGM (assets/sound/bgm.ogg) を丸ごとデコードし、デバイスのレートの
+// モノラル float にして dsp.bgmSample へ入れる。ループ再生そのものは
+// SoundDsp 側の SampleVoice が担う。読めなければ BGM なしで続行する。
+void loadBgm(GameSound& sound, int targetRate) {
+    for (const std::string& dir : soundDirs()) {
+        const std::string path = dir + "bgm.ogg";
+        int channels = 0;
+        int fileRate = 0;
+        short* pcm = nullptr;
+        int frames = stb_vorbis_decode_filename(path.c_str(), &channels, &fileRate, &pcm);
+        if (frames <= 0 || pcm == nullptr || channels <= 0 || fileRate <= 0) {
+            if (pcm) std::free(pcm);
+            continue;
+        }
+        // ステレオ→モノラル。デバイスがモノラル出力なのでここで落とす。
+        std::vector<float> mono(static_cast<size_t>(frames));
+        for (int i = 0; i < frames; ++i) {
+            float sum = 0.0f;
+            for (int ch = 0; ch < channels; ++ch) {
+                sum += pcm[static_cast<size_t>(i) * channels + ch] / 32768.0f;
+            }
+            mono[i] = sum / channels;
+        }
+        std::free(pcm);
+        if (fileRate != targetRate) {
+            // 線形補間でデバイスのレートへ変換（WAV 側の SDL_AudioCVT 相当）。
+            double ratio = double(fileRate) / double(targetRate);
+            size_t outLen = static_cast<size_t>(mono.size() / ratio);
+            std::vector<float> resampled(outLen);
+            for (size_t i = 0; i < outLen; ++i) {
+                double pos = double(i) * ratio;
+                size_t i0 = static_cast<size_t>(pos);
+                float frac = float(pos - double(i0));
+                float a = mono[i0];
+                float b = mono[(i0 + 1) % mono.size()];
+                resampled[i] = a + (b - a) * frac;
+            }
+            mono.swap(resampled);
+        }
+        sound.dsp.bgmSample.data = std::move(mono);
+        SDL_Log("sound: loaded BGM from %s (%d samples, loop)", path.c_str(),
+                static_cast<int>(sound.dsp.bgmSample.data.size()));
+        return;
+    }
+    SDL_Log("sound: bgm.ogg not found, no BGM");
+}
+
 // assets/sound/ からゲーム用サンプルを読む。見つからなければ合成のまま。
 void loadSamples(GameSound& sound, int targetRate) {
-    // 探す場所：相対パスに加えて、実行ファイルの隣（CMake が assets/ を
-    // コピーする場所）を最優先で見る。ゲームを起動したフォルダによって
-    // 「ファイルが見つからず合成音のまま」になる事故を防ぐため。
-    std::vector<std::string> dirs = {"assets/sound/", "../assets/sound/", "/assets/sound/"};
-    if (const char* basePath = SDL_GetBasePath()) {
-        dirs.insert(dirs.begin(), std::string(basePath) + "assets/sound/");
-        SDL_free(const_cast<char*>(basePath));
-    }
-    for (const std::string& dir : dirs) {
+    // 探す場所は soundDirs()（実行ファイルの隣を最優先）。ゲームを起動した
+    // フォルダによって「ファイルが見つからず合成音のまま」になる事故を防ぐ。
+    for (const std::string& dir : soundDirs()) {
         const std::string& base = dir;
         if (!loadWavMono(base + "engine_main.wav", sound.dsp.engineMainSample, targetRate)) {
             continue;
@@ -119,6 +179,7 @@ bool GameSound::init() {
     deviceId_ = device;
     dsp.sampleRate = static_cast<float>(got.freq > 0 ? got.freq : 44100);
     loadSamples(*this, got.freq > 0 ? got.freq : 44100);
+    loadBgm(*this, got.freq > 0 ? got.freq : 44100);
     target = SoundState{};
     target.running = true;
     target.rpm01 = 0.16f;

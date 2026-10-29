@@ -29,6 +29,7 @@ add_executable(racegame
     src/car.cpp
     src/render.cpp
     src/sound.cpp
+    src/stb_vorbis_impl.cpp
 )
 
 set(ASSETS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/assets")

@@ -322,6 +322,52 @@ int main() {
         check(rmsSqueal > rmsPlain * 1.3f, "sample drift: plays on brake squeal (rms)", rmsSqueal);
     }
 
+    // ---- BGM ループ ---------------------------------------------------
+    {
+        SoundDsp dsp;
+        dsp.sampleRate = 44100;
+        // 100 Hz の正弦波 1 周期（441 サンプル）を BGM 素材にする。
+        dsp.bgmSample.data.resize(441);
+        for (int i = 0; i < 441; ++i) {
+            dsp.bgmSample.data[i] = std::sin(6.2831853f * i / 441);
+        }
+        auto renderBuf = [&](const SoundState& st, float seconds) {
+            int total = static_cast<int>(seconds * 44100);
+            std::vector<float> buf(total);
+            dsp.render(buf.data(), total, st);
+            double sumSq = 0;
+            bool finite = true;
+            for (float v : buf) {
+                if (!std::isfinite(v)) finite = false;
+                sumSq += double(v) * v;
+            }
+            return std::make_pair(std::sqrt(float(sumSq / total)), finite);
+        };
+        SoundState bgmOn;  // running=false でエンジン無音、BGM だけを測る
+        bgmOn.bgm = 1.0f;
+        renderBuf(bgmOn, 1.0f);  // フェードインを落ち着かせる
+        auto [rmsBgm, finBgm] = renderBuf(bgmOn, 1.0f);
+        check(finBgm, "bgm: finite", finBgm ? 1.0f : 0.0f);
+        check(rmsBgm > 0.2f, "bgm: audible when on (rms)", rmsBgm);
+        // 素材の長さ（0.01 秒）を何周も越えて鳴り続ける = ループしている。
+        auto [rmsLoop, finLoop] = renderBuf(bgmOn, 2.0f);
+        check(finLoop && rmsLoop > 0.2f, "bgm: keeps looping (rms)", rmsLoop);
+        // bgm=0 ではフェードアウトして無音になり、再生位置も止まる。
+        SoundState bgmOff;
+        renderBuf(bgmOff, 2.0f);
+        auto [rmsOff, finOff] = renderBuf(bgmOff, 1.0f);
+        check(rmsOff < 0.02f, "bgm: silent when off (rms)", rmsOff);
+        double posBefore = dsp.bgmVoice.pos;
+        renderBuf(bgmOff, 1.0f);
+        check(dsp.bgmVoice.pos == posBefore, "bgm: position frozen while off",
+              float(dsp.bgmVoice.pos - posBefore));
+        // makeSoundState 側の配線：走行中は流れ、ポーズでは止まる。
+        check(makeSoundState(20, 20, 0.5f, 0, false, false, 0.02f, false).bgm == 1.0f,
+              "bgm: on while driving", 1.0f);
+        check(makeSoundState(20, 20, 0.5f, 0, false, false, 0.02f, true).bgm == 0.0f,
+              "bgm: off while paused", 0.0f);
+    }
+
     std::printf(failures == 0 ? "\nALL PASS\n" : "\n%d FAILURES\n", failures);
     return failures == 0 ? 0 : 1;
 }

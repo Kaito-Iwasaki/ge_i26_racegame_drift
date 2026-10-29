@@ -250,6 +250,17 @@ g++ -std=c++17 -I. drift_test.cpp car.cpp track.cpp -o drift_test
 - 試聴: `src/sound_preview_samples.cpp` で生成できる試聴ファイル
   （8 秒：アイドル→加速→ドリフト→強ブレーキ）。実測 RMS は
   アイドル 0.07／加速 0.21／ドリフト 0.24。
+- **BGM**: `assets/sound/bgm.ogg` をループ再生する。読み込みだけ OGG が
+  必要なので、デコーダは stb_vorbis（`src/stb_vorbis.c`、実装は
+  `src/stb_vorbis_impl.cpp`）を同梱し、SDL_mixer は引き続き使わない。
+  デコード後はデバイスのレートのモノラルに変換して `SoundDsp` が
+  等速ループする。走行中のみ流れ、ポーズ中はフェードアウトして再生
+  位置も止まる。音量は `sound.hpp` の BGM 分岐の `target.bgm * 0.55f`
+  が入口。同名で OGG を差し替えれば曲も差し替わる（ループの継ぎ目は
+  ファイル側で処理しておくこと）。現在の bgm.ogg はユーザー提供の
+  bgm.mp3（218.9 秒、161.5 BPM）から、末尾の無音と中途半端な尻尾を
+  除いた 136 小節（202.1 秒）を 2 小節クロスフェードでループ化し、
+  約 +34 dB 正規化したもの（元ファイルは平均 -50 dB と極端に小さかった）。
 
 音量バランスやピッチの付き方は `sound.hpp` の `SoundDsp::render` 内、
 サンプル分岐の係数（`rate` の式、`idleMix`、`engGain`、ドリフトの
