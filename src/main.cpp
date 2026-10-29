@@ -1,8 +1,10 @@
 #include "car.hpp"
+#include "camera.hpp"
 #include "render.hpp"
 #include "lighttrail.hpp"
 #include "smoke.hpp"
 #include "effects.hpp"
+#include "rumble.hpp"
 #include "sound.hpp"
 #include "track.hpp"
 
@@ -22,6 +24,47 @@
 #include <emscripten/html5.h>
 
 #include <cstring>
+#endif
+
+#ifdef __EMSCRIPTEN__
+// Gamepad haptics are optional: unsupported devices, browser policies and
+// rejected promises must never interrupt driving.
+EM_JS(void, browserGamepadRumble, (float low, float high, int stop), {
+    try {
+        if (!navigator.getGamepads) return;
+        const pads = Array.from(navigator.getGamepads()).filter(p => p && p.connected);
+        if (!pads.length) { Module.rumblePadIndex = undefined; return; }
+        let pad = pads.find(p => p.index === Module.rumblePadIndex);
+        if (!stop) {
+            const active = pads.find(p => p.buttons.some(b => b.pressed || b.value > 0.15) ||
+                                           p.axes.some(a => Math.abs(a) > 0.20));
+            if (active) pad = active;
+        }
+        pad = pad || pads[0];
+        if (Module.rumblePadIndex !== undefined && Module.rumblePadIndex !== pad.index) {
+            const old = pads.find(p => p.index === Module.rumblePadIndex);
+            if (old && old.vibrationActuator && old.vibrationActuator.reset) {
+                const result = old.vibrationActuator.reset();
+                if (result && result.catch) result.catch(() => {});
+            }
+        }
+        Module.rumblePadIndex = pad.index;
+        const motor = pad.vibrationActuator || (pad.hapticActuators && pad.hapticActuators[0]);
+        if (!motor) return;
+        let result;
+        if (stop || document.hidden) {
+            if (motor.reset) result = motor.reset();
+            else if (motor.pulse) result = motor.pulse(0, 1);
+        } else if (motor.playEffect) {
+            result = motor.playEffect('dual-rumble', {duration: 140, startDelay: 0,
+                strongMagnitude: Math.max(0, Math.min(1, low)),
+                weakMagnitude: Math.max(0, Math.min(1, high))});
+        } else if (motor.pulse) {
+            result = motor.pulse(Math.max(low, high), 140);
+        }
+        if (result && result.catch) result.catch(() => {});
+    } catch (_) { /* Haptics are not available; driving continues normally. */ }
+});
 #endif
 
 namespace {
@@ -44,24 +87,9 @@ struct Race {
 struct Orbit {
     Vec3 eye{0, 8, -12};
     Vec3 look{0, 0, 0};
-    Vec3 anchor{0, 0, 0};  // 追従中の「カメラが見ている車の位置」（慣性で遅れる）
-    float yaw = 0;         // 追従中のカメラの向き（慣性で遅れる）
-    bool ready = false;
+    Vec3 up{0, 1, 0};
     int mode = 0;
 };
-
-// カメラ追従の慣性の調整用。値を変えるだけで挙動が変わる。
-//   inertia = 0   : 車体に完全固定（リジッド）。頭文字D ARCADE STAGE そのまま。
-//   inertia = 0.2 : ほんの少しだけ遅れる（既定）。加速で少し引き、ドリフトで少し遅れて回る。
-//   inertia = 1   : 以下の Max の時間だけ遅れる、かなり緩い追従。
-// 時間は「追いつくまでの時定数（秒）」。大きいほど遅れる。
-struct CameraTuning {
-    float inertia = 0.05f;     // 0..1。まずここだけ触ればよい
-    float yawLagMax = 0.35f;   // inertia=1 のときの向きの遅れ（秒）
-    float posLagMax = 0.25f;   // inertia=1 のときの位置の遅れ（秒）
-    float heightLag = 0.08f;   // 上下の均し（秒）。路面のうねりで画面が跳ねないように。慣性とは独立
-};
-CameraTuning gCameraTuning;
 
 struct App {
     SDL_Window* window = nullptr;
@@ -82,6 +110,7 @@ struct App {
     Orbit camera;
     SmokeSystem smoke;
     SurfaceEffects surfaceEffects;
+    RumbleState rumble;
     std::vector<float> surfaceVerts;
     std::vector<unsigned> surfaceIndices;
     std::vector<float> smokeVerts;
@@ -156,6 +185,22 @@ void openPad(App& app) {
             }
         }
     }
+#endif
+}
+
+void sendRumble(SDL_GameController* pad, const RumbleCommand& command) {
+    if (!command.send && !command.stop) return;
+#ifdef __EMSCRIPTEN__
+    (void)pad;
+    browserGamepadRumble(command.low, command.high, command.stop ? 1 : 0);
+#else
+    if (!pad) return;
+#if SDL_VERSION_ATLEAST(2, 0, 9)
+    SDL_GameControllerRumble(pad,
+        command.stop ? 0 : static_cast<Uint16>(RumbleState::clamp01(command.low) * 65535.0f),
+        command.stop ? 0 : static_cast<Uint16>(RumbleState::clamp01(command.high) * 65535.0f),
+        command.stop ? 0 : 140);
+#endif
 #endif
 }
 
@@ -297,9 +342,10 @@ DriveInput readDrive(SDL_GameController* pad, PadPulse& pulse) {
 void resetRace(App& app) {
     app.car.reset(app.track);
     app.race = Race{};
-    app.camera.ready = false;
     app.smoke.clear();
     app.surfaceEffects.clear();
+    sendRumble(app.pad, RumbleCommand{0, 0, false, true});
+    app.rumble.clear();
     app.brakeTrail.clear();
 }
 
@@ -338,45 +384,19 @@ void tickRace(Race& race, float s, float length, float dt, bool closed = true) {
     race.lap += dt;
 }
 
-void updateCamera(App& app, float dt) {
-    const float back[3] = {8.6f, 4.1f, 16.0f};
-    const float up[3] = {3.3f, 1.55f, 7.2f};
-    const float ahead[3] = {9.0f, 6.0f, 14.0f};
-    int mode = app.camera.mode;
-    const CameraTuning& tune = gCameraTuning;
-    const float inertia = clampf(tune.inertia, 0.0f, 1.0f);
-    // 時定数 tau (秒) からこのフレームの追従率を作る。tau が 0 なら即追従。
-    auto follow = [&](float tau) {
-        return (tau <= 1e-4f || dt <= 0.0f) ? 1.0f : 1.0f - std::exp(-dt / tau);
-    };
+void updateCamera(App& app, float pitch, float roll) {
     Orbit& cam = app.camera;
-    // Blend towards the direction of travel so the car's sideways attitude is visible.
-    // Fade out at low / reverse speeds, where the velocity heading is unstable.
-    const float cameraSlide = app.car.driftAmount * clampf(app.car.velForward / 8.0f, 0.0f, 1.0f);
-    const float cameraYaw = wrapPi(app.car.yaw + clampf(app.car.slipAngle, -0.75f, 0.75f) * 0.85f * cameraSlide);
-    Vec3 carPos{app.car.x, app.car.y, app.car.z};
-    if (!cam.ready) {
-        cam.anchor = carPos;
-        cam.yaw = cameraYaw;
-    } else {
-        // 向きは角度の最短側へ、位置は水平だけ慣性で遅らせる。上下は慣性と別に軽く均す。
-        cam.yaw += wrapPi(cameraYaw - cam.yaw) * follow(inertia * tune.yawLagMax + 0.10f * cameraSlide);
-        float posK = follow(inertia * tune.posLagMax);
-        cam.anchor.x += (carPos.x - cam.anchor.x) * posK;
-        cam.anchor.z += (carPos.z - cam.anchor.z) * posK;
-        cam.anchor.y += (carPos.y - cam.anchor.y) * follow(tune.heightLag);
+    const CameraPose pose = carCameraPose(app.car, cam.mode, pitch, roll);
+    cam.eye = pose.eye;
+    cam.look = pose.look;
+    cam.up = pose.up;
+    if (cam.mode != kHoodCameraMode) {
+        // Keep a chase camera above the road on steep slopes.
+        TrackPose under = app.track.query(cam.eye.x, cam.eye.z, app.car.y, app.car.ground.s);
+        if (under.found && under.xzDist < 30.0f && cam.eye.y < under.centerY + 0.8f) {
+            cam.eye.y = under.centerY + 0.8f;
+        }
     }
-    // 頭文字D ARCADE STAGE 風: 基本は車の真後ろ。inertia が小さいほど車体に固定される。
-    Vec3 forward{std::sin(cam.yaw), 0, std::cos(cam.yaw)};
-    Vec3 eye = cam.anchor - forward * back[mode] + Vec3{0, up[mode], 0};
-    Vec3 look = cam.anchor + forward * ahead[mode] + Vec3{0, 1.15f, 0};
-    TrackPose under = app.track.query(eye.x, eye.z, app.car.y, app.car.ground.s);
-    if (under.found && under.xzDist < 30.0f && eye.y < under.centerY + 0.8f) {
-        eye.y = under.centerY + 0.8f;
-    }
-    cam.eye = eye;
-    cam.look = look;
-    cam.ready = true;
 }
 
 void drawMinimap(App& app) {
@@ -519,6 +539,7 @@ void drawHud(App& app) {
     const char* camName = "CHASE";
     if (app.camera.mode == 1) camName = "CLOSE";
     if (app.camera.mode == 2) camName = "FAR";
+    if (app.camera.mode == kHoodCameraMode) camName = "HOOD";
     hud.drawText(float(hud.width) - 140, 22, 2.0f, camName, 0.8f, 0.84f, 0.88f, 1);
     std::snprintf(line, sizeof(line), "%d FPS", static_cast<int>(std::lround(app.fps)));
     hud.drawText(float(hud.width) - 140, 52, 2.0f, line, 0.8f, 0.84f, 0.88f, 1);
@@ -564,7 +585,7 @@ void frame(void* userdata) {
             SDL_Scancode code = event.key.keysym.scancode;
             if (code == SDL_SCANCODE_ESCAPE) app.running = false;
             else if (code == SDL_SCANCODE_R) reset = true;
-            else if (code == SDL_SCANCODE_C) app.camera.mode = (app.camera.mode + 1) % 3;
+            else if (code == SDL_SCANCODE_C) app.camera.mode = (app.camera.mode + 1) % kCameraModeCount;
             else if (code == SDL_SCANCODE_P) app.paused = !app.paused;
             else if (code == SDL_SCANCODE_H) app.showHelp = !app.showHelp;
         } else if (event.type == SDL_CONTROLLERDEVICEADDED) {
@@ -576,14 +597,14 @@ void frame(void* userdata) {
         } else if (event.type == SDL_CONTROLLERBUTTONDOWN) {
             if (event.cbutton.button == SDL_CONTROLLER_BUTTON_BACK) reset = true;
             else if (event.cbutton.button == SDL_CONTROLLER_BUTTON_START) app.paused = !app.paused;
-            else if (event.cbutton.button == SDL_CONTROLLER_BUTTON_Y) app.camera.mode = (app.camera.mode + 1) % 3;
+            else if (event.cbutton.button == SDL_CONTROLLER_BUTTON_Y) app.camera.mode = (app.camera.mode + 1) % kCameraModeCount;
         }
     }
     PadPulse padPulse;
     DriveInput input = readDrive(app.pad, padPulse);
     if (padPulse.reset) reset = true;
     if (padPulse.pause) app.paused = !app.paused;
-    if (padPulse.camera) app.camera.mode = (app.camera.mode + 1) % 3;
+    if (padPulse.camera) app.camera.mode = (app.camera.mode + 1) % kCameraModeCount;
     if (reset) {
         resetRace(app);
     }
@@ -609,6 +630,11 @@ void frame(void* userdata) {
             const float effectDt = float(kFixedStepSec);
             Vec3 carVel{app.car.velX, 0, app.car.velZ};
             if (app.car.wallContact) {
+                if (app.car.wallNewContact) {
+                    const float direction = RumbleState::wallDirection(app.car.yaw,
+                        app.car.ground.rightX, app.car.ground.rightZ, app.car.wallSide);
+                    app.rumble.collision(app.car.wallImpact, direction);
+                }
                 Vec3 inward{-app.car.ground.rightX * app.car.wallSide, 0,
                             -app.car.ground.rightZ * app.car.wallSide};
                 Vec3 point{app.car.x, app.car.y + 0.55f, app.car.z};
@@ -628,6 +654,13 @@ void frame(void* userdata) {
             ++guard;
         }
     }
+    const float wallVibrationDirection = app.car.wallContact
+        ? RumbleState::wallDirection(app.car.yaw, app.car.ground.rightX,
+                                     app.car.ground.rightZ, app.car.wallSide) : 0.0f;
+    const RumbleCommand vibration = app.rumble.update(float(elapsed), app.paused || !app.running,
+        app.car.ground.found, app.car.onAsphalt, app.car.drifting, app.car.slipAngle,
+        app.car.groundSpeed(), app.car.wallContact, wallVibrationDirection);
+    sendRumble(app.pad, vibration);
     // 音はフレーム単位でよい。ポーズ中はアイドル＋無音になる。
     // 回転数だけは EngineVoice（ギア状態つき）で作って上書きする。速度への単純な
     // 写像だとギア境界でピッチが跳ねたり往復したりするため。
@@ -640,12 +673,10 @@ void frame(void* userdata) {
     // 前進中（または停止中）にブレーキを踏んでいる間だけランプを点灯する。
     // 後退中の通常ブレーキは後退加速。サイドブレーキは速度に関係なく点灯。
     app.braking = brakeLightsActive(input, app.car.speed);
-    updateCamera(app, float(elapsed));
-
-    // 車体の姿勢（ピッチ＝路面の前後傾斜、ロール＝路面のバンク＋ハンドル
-    // による車体の傾き）。描画とブレーキランプ軌跡の両方で使う。
+    // The hood camera and vehicle mesh use the same pitch and roll.
     float pitch = carPitch(app) + app.car.bodyPitch;
     float roll = std::atan(app.car.ground.cross) + app.car.bodyRoll;
+    updateCamera(app, pitch, roll);
 
     // ブレーキランプ点灯中は、左右ランプの位置を履歴に残して光の軌跡にする。
     if (!app.paused) {
@@ -686,7 +717,7 @@ void frame(void* userdata) {
     // スピード感：速いほど視野角を少し広げて、景色の流れを強調する。
     float fovDeg = 62.0f + 12.0f * clampf(app.car.groundSpeed() / (150.0f / 3.6f), 0.0f, 1.0f);
     Mat4 proj = perspective(fovDeg * 3.14159265f / 180.0f, aspect, 0.15f, 4000.0f);
-    Mat4 view = lookAt(app.camera.eye, app.camera.look, {0, 1, 0});
+    Mat4 view = lookAt(app.camera.eye, app.camera.look, app.camera.up);
     Mat4 viewProj = mul(proj, view);
     app.renderer.beginWorld(viewProj, app.camera.eye);
 
@@ -713,7 +744,7 @@ void frame(void* userdata) {
     // タイヤ煙は半透明なので、不透明な車体の後にビルボードで重ねる。
     {
         Vec3 camFwd = normalize(app.camera.look - app.camera.eye);
-        Vec3 camRight = normalize(cross(camFwd, Vec3{0, 1, 0}));
+        Vec3 camRight = normalize(cross(camFwd, app.camera.up));
         Vec3 camUp = cross(camRight, camFwd);
         app.smoke.buildQuads(camRight, camUp, app.smokeVerts, app.smokeIndices);
         app.renderer.drawSmoke(app.smokeVerts.data(),
@@ -724,7 +755,7 @@ void frame(void* userdata) {
     // Mud uses normal alpha blending; sparks use the existing additive glow shader.
     {
         Vec3 camFwd = normalize(app.camera.look - app.camera.eye);
-        Vec3 camRight = normalize(cross(camFwd, Vec3{0, 1, 0}));
+        Vec3 camRight = normalize(cross(camFwd, app.camera.up));
         Vec3 camUp = cross(camRight, camFwd);
         for (bool sparks : {false, true}) {
             app.surfaceEffects.buildQuads(camRight, camUp, sparks, app.surfaceVerts, app.surfaceIndices);
@@ -931,6 +962,7 @@ int main(int argc, char** argv) {
     }
 #endif
 
+    sendRumble(app.pad, RumbleCommand{0, 0, false, true});
     if (app.pad) SDL_GameControllerClose(app.pad);
     app.sound.shutdown();
     if (imageOk) IMG_Quit();
