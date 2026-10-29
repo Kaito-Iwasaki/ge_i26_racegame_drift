@@ -1,5 +1,6 @@
 #include "car.hpp"
 #include "camera.hpp"
+#include "countdown.hpp"
 #include "render.hpp"
 #include "lighttrail.hpp"
 #include "smoke.hpp"
@@ -108,6 +109,7 @@ struct App {
     GpuMesh shadow;
     bool braking = false;  // 今フレームのブレーキ入力（ブレーキランプ点灯用）
     Race race;
+    StartCountdown countdown;
     Orbit camera;
     SmokeSystem smoke;
     SurfaceEffects surfaceEffects;
@@ -346,6 +348,8 @@ DriveInput readDrive(SDL_GameController* pad, PadPulse& pulse) {
 void resetRace(App& app) {
     app.car.reset(app.track);
     app.race = Race{};
+    app.countdown.reset();
+    app.accumulator = 0;
     app.smoke.clear();
     app.surfaceEffects.clear();
     app.skidMarks.clear();
@@ -588,6 +592,20 @@ void drawHud(App& app) {
                      0.75f, 0.8f, 0.84f, 1);
     }
     hud.drawText(float(hud.width) - 250, float(hud.height) - 28, 1.6f, "(C) OSM / GSI", 0.85f, 0.88f, 0.9f, 1);
+    if (!app.paused && (app.countdown.number() > 0 || app.countdown.showGo())) {
+        const bool go = app.countdown.showGo();
+        char countdownText[4];
+        if (go) std::snprintf(countdownText, sizeof(countdownText), "GO");
+        else std::snprintf(countdownText, sizeof(countdownText), "%d", app.countdown.number());
+        const float scale = 9.0f;
+        const float centerX = float(hud.width) * 0.5f;
+        const float centerY = float(hud.height) * 0.34f;
+        const float width = float(std::strlen(countdownText)) * 6.0f * scale;
+        hud.addQuad(centerX-width*.5f-18, centerY-12, centerX+width*.5f+18,
+                    centerY+7.0f*scale+12, 0.02f, 0.03f, 0.05f, 0.70f);
+        hud.drawText(centerX-width*.5f, centerY, scale, countdownText,
+                     go ? 0.35f : 1.0f, go ? 1.0f : 0.83f, go ? 0.38f : 0.25f, 1.0f);
+    }
     if (app.paused) {
         hud.drawText(float(hud.width) * 0.5f - 70, float(hud.height) * 0.45f, 5.0f, "PAUSE", 1, 0.95f, 0.9f, 1);
     }
@@ -653,6 +671,7 @@ void frame(void* userdata) {
     }
     if (elapsed > kMaxFrameSec) elapsed = kMaxFrameSec;
     if (elapsed < 0) elapsed = 0;
+    if (reset) elapsed = 0; // Do not consume time from before the reset.
 
     if (app.paused) {
         app.accumulator = 0;
@@ -660,6 +679,11 @@ void frame(void* userdata) {
         app.accumulator += elapsed;
         int guard = 0;
         while (app.accumulator >= kFixedStepSec && guard < 8) {
+            if (!app.countdown.step(kFixedStepSec)) {
+                app.accumulator -= kFixedStepSec;
+                ++guard;
+                continue;
+            }
             app.car.update(float(kFixedStepSec) * kDrivingPace, input, app.track);
             recordBrakeMarks(app, input);
             // Emit on every physics step so brief collisions are not lost between frames.
