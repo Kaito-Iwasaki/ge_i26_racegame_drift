@@ -274,16 +274,16 @@ void addTrees(CpuMesh& mesh, const Track& track) {
         }
         addTree(mesh, cx, cz, baseY, sd, scale);
     };
-    for (int i = 0; i < segs; i += 2) {
+    for (int i = 0; i < segs; i += 8) {
         for (int side = -1; side <= 1; side += 2) {
             float sign = float(side);
             ++seed;
-            if (treeRand(seed * 31 + 7) >= 0.30f) {
+            if (treeRand(seed * 31 + 7) >= 0.70f) {
                 float lat = wall + 3.5f + treeRand(seed * 31 + 8) * 30.0f;
                 tryPlant(i, sign, lat, 0.9f + treeRand(seed * 31 + 9) * 0.3f, seed);
             }
             ++seed;
-            if (treeRand(seed * 31 + 7) >= 0.65f) {
+            if (treeRand(seed * 31 + 7) >= 0.85f) {
                 float lat = wall + 32.0f + treeRand(seed * 31 + 8) * 45.0f;
                 tryPlant(i, sign, lat, 1.6f + treeRand(seed * 31 + 9) * 0.8f, seed);
             }
@@ -546,6 +546,485 @@ void addMountain(CpuMesh& mesh, const Track& track) {
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// 山岳地形と森（オープンの峠コース用）
+//
+// コースの標高に沿った高さ場を作る。路面の近くは路面より必ず下に置き、
+// 離れるほど斜面が立ち上がり、さらに遠くは稜線が視界を塞ぐ高さまで上がる。
+// 木はこの高さ場に植えるので、斜面にも自然に立つ。
+// ---------------------------------------------------------------------------
+
+float hash2(int x, int z) {
+    std::uint32_t h = std::uint32_t(x) * 374761393u + std::uint32_t(z) * 668265263u;
+    h = (h ^ (h >> 13)) * 1274126177u;
+    h ^= h >> 16;
+    return float(h & 0xffffffu) / float(0x1000000u);
+}
+
+float valueNoise(float x, float z) {
+    int xi = int(std::floor(x));
+    int zi = int(std::floor(z));
+    float fx = x - float(xi);
+    float fz = z - float(zi);
+    float ux = fx * fx * (3.0f - 2.0f * fx);
+    float uz = fz * fz * (3.0f - 2.0f * fz);
+    float a = hash2(xi, zi), b = hash2(xi + 1, zi);
+    float c = hash2(xi, zi + 1), d = hash2(xi + 1, zi + 1);
+    return (a + (b - a) * ux) * (1.0f - uz) + (c + (d - c) * ux) * uz;
+}
+
+float fbm(float x, float z, int octaves) {
+    float sum = 0, amp = 0.5f, norm = 0;
+    for (int o = 0; o < octaves; ++o) {
+        sum += amp * valueNoise(x, z);
+        norm += amp;
+        x = x * 2.03f + 17.0f;
+        z = z * 2.03f + 31.0f;
+        amp *= 0.5f;
+    }
+    return sum / norm;
+}
+
+float smooth01(float a, float b, float v) {
+    float t = clampf((v - a) / (b - a), 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
+// 路面サンプルの空間ハッシュ（最寄りの路面を速く引く）。
+struct SampleGrid {
+    float minX = 0, minZ = 0, cell = 48.0f;
+    int nx = 1, nz = 1;
+    std::vector<std::vector<int>> bins;
+    void build(const Track& track) {
+        float maxX = track.samples[0].x, maxZ = track.samples[0].z;
+        minX = maxX;
+        minZ = maxZ;
+        for (const TrackSample& s : track.samples) {
+            minX = std::min(minX, s.x); maxX = std::max(maxX, s.x);
+            minZ = std::min(minZ, s.z); maxZ = std::max(maxZ, s.z);
+        }
+        nx = int((maxX - minX) / cell) + 1;
+        nz = int((maxZ - minZ) / cell) + 1;
+        bins.assign(size_t(nx) * size_t(nz), {});
+        for (int i = 0; i < int(track.samples.size()); ++i) {
+            int ix = clampi(int((track.samples[i].x - minX) / cell), 0, nx - 1);
+            int iz = clampi(int((track.samples[i].z - minZ) / cell), 0, nz - 1);
+            bins[size_t(iz) * size_t(nx) + size_t(ix)].push_back(i);
+        }
+    }
+    static int clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+    // Find only points within the scenery radius, without scanning the whole track.
+    int nearestWithin(const Track& track, float x, float z, float radius, float& d2Out) const {
+        const int x0 = std::max(0, int(std::floor((x - radius - minX) / cell)));
+        const int x1 = std::min(nx - 1, int(std::floor((x + radius - minX) / cell)));
+        const int z0 = std::max(0, int(std::floor((z - radius - minZ) / cell)));
+        const int z1 = std::min(nz - 1, int(std::floor((z + radius - minZ) / cell)));
+        int best = -1;
+        float bestD2 = radius * radius;
+        for (int iz = z0; iz <= z1; ++iz) {
+            for (int ix = x0; ix <= x1; ++ix) {
+                for (int idx : bins[size_t(iz) * size_t(nx) + size_t(ix)]) {
+                    const float dx = track.samples[idx].x - x, dz = track.samples[idx].z - z;
+                    const float d2 = dx * dx + dz * dz;
+                    if (d2 < bestD2) { bestD2 = d2; best = idx; }
+                }
+            }
+        }
+        d2Out = bestD2;
+        return best;
+    }
+    // 最寄りの路面サンプル番号と、その距離の二乗。遠い点は全体を総当たりで探す。
+    int nearest(const Track& track, float x, float z, float& d2Out) const {
+        int cx = clampi(int(std::floor((x - minX) / cell)), -1000000, 1000000);
+        int cz = clampi(int(std::floor((z - minZ) / cell)), -1000000, 1000000);
+        int best = -1;
+        float bestD2 = 1.0e30f;
+        for (int ring = 0; ring < 6; ++ring) {
+            for (int dz = -ring; dz <= ring; ++dz) {
+                for (int dx = -ring; dx <= ring; ++dx) {
+                    if (std::max(std::abs(dx), std::abs(dz)) != ring) continue;
+                    int ix = cx + dx, iz = cz + dz;
+                    if (ix < 0 || iz < 0 || ix >= nx || iz >= nz) continue;
+                    for (int idx : bins[size_t(iz) * size_t(nx) + size_t(ix)]) {
+                        float ex = track.samples[idx].x - x, ez = track.samples[idx].z - z;
+                        float d2 = ex * ex + ez * ez;
+                        if (d2 < bestD2) { bestD2 = d2; best = idx; }
+                    }
+                }
+            }
+            // 次のリングは最低でも ring*cell 以上離れている。見つかっていて十分近ければ打ち切る。
+            if (best >= 0 && bestD2 < (float(ring) * cell) * (float(ring) * cell)) break;
+        }
+        if (best < 0) {
+            for (int idx = 0; idx < int(track.samples.size()); ++idx) {
+                float ex = track.samples[idx].x - x, ez = track.samples[idx].z - z;
+                float d2 = ex * ex + ez * ez;
+                if (d2 < bestD2) { bestD2 = d2; best = idx; }
+            }
+        }
+        d2Out = bestD2;
+        return best;
+    }
+};
+
+struct Terrain {
+    float minX = 0, minZ = 0;
+    float cell = 10.0f;
+    int nx = 0, nz = 0;
+    std::vector<float> h;
+    std::vector<float> roadDistance2;
+    float at(int ix, int iz) const {
+        ix = ix < 0 ? 0 : (ix >= nx ? nx - 1 : ix);
+        iz = iz < 0 ? 0 : (iz >= nz ? nz - 1 : iz);
+        return h[size_t(iz) * size_t(nx) + size_t(ix)];
+    }
+    // メッシュと同じ三角形分割で高さを求める。
+    float sample(float x, float z) const {
+        float gx = (x - minX) / cell, gz = (z - minZ) / cell;
+        int ix = int(std::floor(gx)), iz = int(std::floor(gz));
+        float fx = gx - float(ix), fz = gz - float(iz);
+        float a = at(ix, iz), b = at(ix + 1, iz), c = at(ix + 1, iz + 1), d = at(ix, iz + 1);
+        // 分割は a-c の対角線。
+        if (fx >= fz) return a + (b - a) * fx + (c - b) * fz;
+        return a + (d - a) * fz + (c - d) * fx;
+    }
+};
+
+// 路面の端の高さ（横断勾配込み。路面リボンの外端の高さと同じ）。
+float roadSurfaceAt(const Track& track, int idx, float x, float z) {
+    Vec3 r = horizontalRight(track, idx);
+    float lat = (x - track.samples[idx].x) * r.x + (z - track.samples[idx].z) * r.z;
+    float edge = track.halfWidth + track.curbWidth;
+    return track.samples[idx].y + clampf(lat, -edge, edge) * track.samples[idx].cross;
+}
+
+constexpr float kTerrainCell = 10.0f;
+constexpr float kTerrainRadius = 180.0f;
+constexpr float kTerrainMargin = kTerrainRadius + 2.0f * kTerrainCell;
+
+Terrain buildTerrain(const Track& track, const SampleGrid& grid) {
+    Terrain t;
+    float minX = track.samples[0].x, maxX = minX, minZ = track.samples[0].z, maxZ = minZ;
+    for (const TrackSample& s : track.samples) {
+        minX = std::min(minX, s.x); maxX = std::max(maxX, s.x);
+        minZ = std::min(minZ, s.z); maxZ = std::max(maxZ, s.z);
+    }
+    t.cell = kTerrainCell;
+    t.minX = minX - kTerrainMargin;
+    t.minZ = minZ - kTerrainMargin;
+    t.nx = int((maxX - minX + 2.0f * kTerrainMargin) / t.cell) + 1;
+    t.nz = int((maxZ - minZ + 2.0f * kTerrainMargin) / t.cell) + 1;
+    t.h.assign(size_t(t.nx) * size_t(t.nz), 0.0f);
+    t.roadDistance2.assign(t.h.size(), 1.0e30f);
+
+    // 遠くの高さを滑らかにつなぐための間引き（約 24 m 間隔）。
+    std::vector<int> coarse;
+    for (int i = 0; i < int(track.samples.size()); i += 6) coarse.push_back(i);
+    const float wall = track.wallLateral();
+
+    for (int iz = 0; iz < t.nz; ++iz) {
+        for (int ix = 0; ix < t.nx; ++ix) {
+            float x = t.minX + float(ix) * t.cell;
+            float z = t.minZ + float(iz) * t.cell;
+            float d2;
+            // A one-cell halo is retained for normals and interpolation at the edge.
+            int near = grid.nearestWithin(track, x, z, kTerrainRadius + 2.0f * t.cell, d2);
+            if (near < 0) continue;
+            t.roadDistance2[size_t(iz) * size_t(t.nx) + size_t(ix)] = d2;
+            float dm = std::sqrt(d2);
+            float hStar = roadSurfaceAt(track, near, x, z);  // 最寄りの路面の高さ
+
+            // 路面の高さを距離で重みづけして滑らかに補間（尾根・谷の骨格）。
+            double wsum = 0, hsum = 0;
+            for (int idx : coarse) {
+                float ex = track.samples[idx].x - x, ez = track.samples[idx].z - z;
+                float q = ex * ex + ez * ez + 25.0f;
+                double w = 1.0 / (double(q) * std::sqrt(std::sqrt(double(q))));
+                wsum += w;
+                hsum += w * track.samples[idx].y;
+            }
+            float cs = float(hsum / wsum);
+
+            // 近い起伏: 路肩の外から斜面が立ち上がる（谷側は少し下がる場所もある）。
+            float nNear = fbm(x / 170.0f, z / 170.0f, 3);
+            float amp = -16.0f + 78.0f * smooth01(0.18f, 0.78f, nNear);
+            float u = std::max(dm - 14.0f, 0.0f);
+            float near_rise = amp * (1.0f - std::exp(-u / 85.0f)) * smooth01(0.0f, 16.0f, u);
+            // 遠い起伏: 外へ行くほど稜線が高くなり、遠くまで見通せないようにする。
+            float nFar = fbm(x / 650.0f + 5.0f, z / 650.0f + 9.0f, 3);
+            float far_rise = smooth01(120.0f, 820.0f, dm) * (190.0f + 300.0f * nFar);
+            // 細かい凹凸（路面の近くは出さない）。
+            float bump = (fbm(x / 28.0f, z / 28.0f, 2) - 0.5f) * 9.0f * smooth01(20.0f, 70.0f, dm);
+
+            // 路面の近くは最寄りの路面の高さそのもの、離れるほど滑らかな骨格 cs へ移る。
+            float base = hStar + (cs - hStar) * smooth01(10.0f, 40.0f, dm);
+            float height = base - 0.9f + near_rise + far_rise + bump;
+            // 路面を覆わないための安全弁: 最寄りの路面より少し下から、最大でも約 42° の勾配まで。
+            if (dm < 60.0f) {
+                height = std::min(height, hStar - 0.9f + std::max(dm - 10.0f, 0.0f) * 0.9f);
+            }
+            (void)wall;
+            t.h[size_t(iz) * size_t(t.nx) + size_t(ix)] = height;
+        }
+    }
+    return t;
+}
+
+void addTerrainMesh(CpuMesh& mesh, const Terrain& t) {
+    const float radius2 = kTerrainRadius * kTerrainRadius;
+    const size_t count = size_t(t.nx) * size_t(t.nz);
+    std::vector<unsigned char> used(count, 0);
+    auto index = [&](int x, int z) { return size_t(z) * size_t(t.nx) + size_t(x); };
+    auto includeCell = [&](int x, int z) {
+        const size_t a = index(x,z), b = index(x+1,z), c = index(x+1,z+1), d = index(x,z+1);
+        const float missing = 1.0e29f;
+        if (t.roadDistance2[a] >= missing || t.roadDistance2[b] >= missing ||
+            t.roadDistance2[c] >= missing || t.roadDistance2[d] >= missing) return false;
+        return std::min(std::min(t.roadDistance2[a], t.roadDistance2[b]),
+                        std::min(t.roadDistance2[c], t.roadDistance2[d])) <= radius2;
+    };
+    for (int z = 0; z + 1 < t.nz; ++z) for (int x = 0; x + 1 < t.nx; ++x) {
+        if (!includeCell(x,z)) continue;
+        used[index(x,z)] = used[index(x+1,z)] = used[index(x+1,z+1)] = used[index(x,z+1)] = 1;
+    }
+    std::vector<std::uint32_t> ids(count, 0);
+    auto heightNear = [&](int x, int z, float fallback) {
+        x = std::max(0, std::min(x,t.nx-1)); z = std::max(0, std::min(z,t.nz-1));
+        const size_t k = index(x,z);
+        return t.roadDistance2[k] < 1.0e29f ? t.h[k] : fallback;
+    };
+    for (int z = 0; z < t.nz; ++z) for (int x = 0; x < t.nx; ++x) {
+        const size_t k = index(x,z);
+        if (!used[k]) continue;
+        const float wx = t.minX + float(x)*t.cell, wz = t.minZ + float(z)*t.cell, h = t.h[k];
+        const float dhx = (heightNear(x+1,z,h) - heightNear(x-1,z,h)) / (2.0f*t.cell);
+        const float dhz = (heightNear(x,z+1,h) - heightNear(x,z-1,h)) / (2.0f*t.cell);
+        const Vec3 n = normalize(Vec3{-dhx,1.0f,-dhz});
+        const float slope = std::sqrt(dhx*dhx+dhz*dhz);
+        const float v1 = fbm(wx/60.0f,wz/60.0f,3);
+        const float v2 = fbm(wx/9.0f+3.0f,wz/9.0f+7.0f,2);
+        const Vec3 forest{0.07f+0.05f*v1,0.17f+0.11f*v1+0.03f*v2,0.06f+0.03f*v1};
+        const Vec3 rock{0.30f+0.06f*v2,0.27f+0.05f*v2,0.22f+0.04f*v2};
+        const float blend = smooth01(0.85f,1.25f,slope);
+        ids[k] = static_cast<std::uint32_t>(mesh.vertices.size()/9);
+        mesh.addVertex({wx,h,wz},n,forest*(1.0f-blend)+rock*blend);
+    }
+    for (int z = 0; z + 1 < t.nz; ++z) for (int x = 0; x + 1 < t.nx; ++x) {
+        if (!includeCell(x,z)) continue;
+        const auto a=ids[index(x,z)], b=ids[index(x+1,z)], c=ids[index(x+1,z+1)], d=ids[index(x,z+1)];
+        // The grid increases towards +x,+z: clockwise in xz gives an upward normal.
+        mesh.addRawTriangle(a,c,b);
+        mesh.addRawTriangle(a,d,c);
+    }
+}
+
+// 幹（先細りの四角柱）。頂点 8・三角形 8 で済ませる。
+void addTrunk(CpuMesh& mesh, float cx, float cz, float yBot, float yTop, float rBot, float rTop,
+              float rot, Vec3 bark) {
+    std::uint32_t base = static_cast<std::uint32_t>(mesh.vertices.size() / 9);
+    for (int ring = 0; ring < 2; ++ring) {
+        float r = ring == 0 ? rBot : rTop;
+        float y = ring == 0 ? yBot : yTop;
+        for (int k = 0; k < 4; ++k) {
+            float a = rot + 1.5707963f * float(k);
+            mesh.addVertex({cx + std::cos(a) * r, y, cz + std::sin(a) * r},
+                           normalize(Vec3{std::cos(a), 0.1f, std::sin(a)}), bark * (ring == 0 ? 0.8f : 1.0f));
+        }
+    }
+    for (int k = 0; k < 4; ++k) {
+        int k2 = (k + 1) % 4;
+        std::uint32_t a = base + std::uint32_t(k), b = base + std::uint32_t(k2);
+        std::uint32_t c = base + 4 + std::uint32_t(k2), d = base + 4 + std::uint32_t(k);
+        Vec3 pa{mesh.vertices[a * 9], mesh.vertices[a * 9 + 1], mesh.vertices[a * 9 + 2]};
+        Vec3 pb{mesh.vertices[b * 9], mesh.vertices[b * 9 + 1], mesh.vertices[b * 9 + 2]};
+        Vec3 pd{mesh.vertices[d * 9], mesh.vertices[d * 9 + 1], mesh.vertices[d * 9 + 2]};
+        Vec3 outward = (pa + pb) * 0.5f - Vec3{cx, 0, cz};
+        if (dot(cross(pb - pa, pd - pa), outward) < 0.0f) {
+            mesh.addRawTriangle(a, d, b); mesh.addRawTriangle(b, d, c);
+        } else {
+            mesh.addRawTriangle(a, b, d); mesh.addRawTriangle(b, c, d);
+        }
+    }
+}
+
+// 針葉樹（杉）。高さは 17〜27 m。lod 0 は近景（3 段）、1 は中景（2 段）、2 は遠景（1 段）。
+void addConifer(CpuMesh& mesh, float cx, float cz, float baseY, int seed, float height, int lod) {
+    float radius = height * (0.185f + 0.045f * treeRand(seed * 5 + 1));
+    float g = treeRand(seed * 5 + 2);
+    Vec3 leaf{0.05f + 0.06f * g, 0.17f + 0.13f * g, 0.07f + 0.05f * treeRand(seed * 5 + 3)};
+    const int segN = 6;
+    float rot = treeRand(seed * 5 + 4) * 6.2831853f;
+    int tiers = lod == 0 ? 3 : (lod == 1 ? 2 : 1);
+    if (lod == 0) {
+        // 下枝の下に見える幹
+        float tr = 0.30f + height * 0.006f;
+        addTrunk(mesh, cx, cz, baseY - 0.6f, baseY + height * 0.32f, tr, tr * 0.6f, rot,
+                 Vec3{0.26f, 0.19f, 0.13f});
+    }
+    for (int tier = 0; tier < tiers; ++tier) {
+        float t0 = tiers == 1 ? 0.12f : (0.14f + 0.26f * float(tier));
+        float t1 = tiers == 1 ? 1.0f : std::min(1.0f, t0 + (tier == tiers - 1 ? (1.0f - t0) : 0.46f));
+        float baseR = radius * (tiers == 1 ? 1.0f : (1.0f - 0.26f * float(tier)));
+        float yBase = baseY + height * t0;
+        float yTop = baseY + height * t1;
+        std::uint32_t apexId = static_cast<std::uint32_t>(mesh.vertices.size() / 9);
+        mesh.addVertex({cx, yTop, cz}, {0, 1, 0}, leaf * 1.18f);
+        for (int k = 0; k < segN; ++k) {
+            float a = rot + 6.2831853f * float(k) / float(segN) + (tier & 1) * 0.5f;
+            Vec3 p{cx + std::cos(a) * baseR, yBase, cz + std::sin(a) * baseR};
+            Vec3 n = normalize(Vec3{std::cos(a), 0.55f, std::sin(a)});
+            mesh.addVertex(p, n, leaf * 0.82f);
+        }
+        for (int k = 0; k < segN; ++k) {
+            std::uint32_t p0 = apexId + 1 + std::uint32_t(k);
+            std::uint32_t p1 = apexId + 1 + std::uint32_t((k + 1) % segN);
+            Vec3 A{mesh.vertices[apexId * 9], mesh.vertices[apexId * 9 + 1], mesh.vertices[apexId * 9 + 2]};
+            Vec3 B{mesh.vertices[p0 * 9], mesh.vertices[p0 * 9 + 1], mesh.vertices[p0 * 9 + 2]};
+            Vec3 C{mesh.vertices[p1 * 9], mesh.vertices[p1 * 9 + 1], mesh.vertices[p1 * 9 + 2]};
+            Vec3 mid = (B + C) * 0.5f - Vec3{cx, 0, cz};
+            Vec3 nrm = normalize(Vec3{mid.x, 0.55f, mid.z});
+            if (dot(cross(B - A, C - A), nrm) < 0.0f) {
+                mesh.addRawTriangle(apexId, p1, p0);
+            } else {
+                mesh.addRawTriangle(apexId, p0, p1);
+            }
+        }
+    }
+}
+
+// 広葉樹（明るめの緑）。丸い樹冠を 4 つの輪を結んだ膨らみで表す。
+void addBroadleaf(CpuMesh& mesh, float cx, float cz, float baseY, int seed, float height) {
+    float radius = height * (0.33f + 0.07f * treeRand(seed * 5 + 1));
+    float g = treeRand(seed * 5 + 2);
+    Vec3 leaf{0.13f + 0.12f * g, 0.29f + 0.16f * g, 0.08f + 0.05f * treeRand(seed * 5 + 3)};
+    const int segN = 7;
+    float rot = treeRand(seed * 5 + 4) * 6.2831853f;
+    float tr = 0.28f + height * 0.007f;
+    addTrunk(mesh, cx, cz, baseY - 0.6f, baseY + height * 0.50f, tr, tr * 0.65f, rot,
+             Vec3{0.28f, 0.21f, 0.15f});
+    // 下の頂点 → 4 つの輪 → 上の頂点
+    const float ringH[4] = {0.40f, 0.52f, 0.68f, 0.88f};
+    const float ringR[4] = {0.55f, 0.97f, 1.00f, 0.60f};
+    const float shade[4] = {0.70f, 0.90f, 1.05f, 1.18f};
+    std::uint32_t botId = static_cast<std::uint32_t>(mesh.vertices.size() / 9);
+    mesh.addVertex({cx, baseY + height * 0.34f, cz}, {0, -1, 0}, leaf * 0.6f);
+    std::uint32_t ringId = botId + 1;
+    for (int r = 0; r < 4; ++r) {
+        for (int k = 0; k < segN; ++k) {
+            float a = rot + 6.2831853f * float(k) / float(segN) + 0.4f * float(r);
+            Vec3 p{cx + std::cos(a) * radius * ringR[r], baseY + height * ringH[r],
+                   cz + std::sin(a) * radius * ringR[r]};
+            float ny = r == 0 ? -0.4f : (r == 3 ? 0.7f : 0.2f);
+            mesh.addVertex(p, normalize(Vec3{std::cos(a), ny, std::sin(a)}), leaf * shade[r]);
+        }
+    }
+    std::uint32_t topId = ringId + 4 * segN;
+    mesh.addVertex({cx, baseY + height, cz}, {0, 1, 0}, leaf * 1.25f);
+    auto V = [&](std::uint32_t id) {
+        return Vec3{mesh.vertices[id * 9], mesh.vertices[id * 9 + 1], mesh.vertices[id * 9 + 2]};
+    };
+    auto tri = [&](std::uint32_t a, std::uint32_t b, std::uint32_t c) {
+        Vec3 pa = V(a), pb = V(b), pc = V(c);
+        Vec3 out = (pa + pb + pc) * (1.0f / 3.0f) - Vec3{cx, baseY + height * 0.62f, cz};
+        if (dot(cross(pb - pa, pc - pa), out) < 0.0f) std::swap(b, c);
+        mesh.addRawTriangle(a, b, c);
+    };
+    for (int k = 0; k < segN; ++k) {
+        int k2 = (k + 1) % segN;
+        tri(botId, ringId + std::uint32_t(k), ringId + std::uint32_t(k2));
+        for (int r = 0; r < 3; ++r) {
+            std::uint32_t a = ringId + std::uint32_t(r * segN + k), b = ringId + std::uint32_t(r * segN + k2);
+            std::uint32_t c = ringId + std::uint32_t((r + 1) * segN + k2), d = ringId + std::uint32_t((r + 1) * segN + k);
+            tri(a, b, c);
+            tri(a, c, d);
+        }
+        tri(topId, ringId + std::uint32_t(3 * segN + k), ringId + std::uint32_t(3 * segN + k2));
+    }
+}
+
+// Small low-poly shrubs fill the near verge without another full tree mesh.
+void addShrub(CpuMesh& mesh, float x, float z, float y, float radius, int seed) {
+    const float shade = treeRand(seed * 11 + 3);
+    const Vec3 color{0.10f + 0.04f * shade, 0.28f + 0.13f * shade, 0.08f};
+    const Vec3 top{x, y + radius * 0.85f, z};
+    Vec3 p[4] = {{x-radius,y,z-radius},{x+radius,y,z-radius},
+                 {x+radius,y,z+radius},{x-radius,y,z+radius}};
+    for (int k=0; k<4; ++k) {
+        const Vec3 a=p[k], b=p[(k+1)%4];
+        const Vec3 outward = normalize(Vec3{(a.x+b.x)*0.5f-x, radius*0.7f, (a.z+b.z)*0.5f-z});
+        mesh.addTriangle(a,b,top,outward,color*(0.85f+0.05f*k));
+    }
+}
+
+// Grow a sparse, oversized canopy in two road-facing rows.  Trees behind a
+// ridge or far from all road samples do not contribute and are not generated.
+void addForest(CpuMesh& mesh, const Track& track, const Terrain& terrain, const SampleGrid& grid) {
+    const float wall = track.wallLateral();
+    const int n = static_cast<int>(track.samples.size());
+    auto exposed = [&](int road, float x, float z, float ground, float height) {
+        const auto& s = track.samples[road];
+        // Check several points along the line of sight to the upper canopy.
+        for (float f : {0.25f, 0.50f, 0.75f}) {
+            const float px = s.x + (x-s.x)*f, pz = s.z + (z-s.z)*f;
+            const float sightY = (s.y + 3.0f)*(1.0f-f) + (ground + height*0.75f)*f;
+            if (terrain.sample(px,pz) > sightY + 1.0f) return false;
+        }
+        return true;
+    };
+    auto place = [&](int i, int side, int row) {
+        const int seed = i * 7 + (side > 0 ? 1 : 4) + row * 100003;
+        const float height = 25.0f + 11.0f * treeRand(seed * 3 + 1);
+        const bool broad = treeRand(seed * 3 + 2) < 0.24f;
+        const float treeHeight = height * (broad ? 0.90f : 1.0f);
+        // Maximum canopy radius plus a margin keeps all branches off the playable road.
+        const float crown = treeHeight * (broad ? 0.40f : 0.23f);
+        const float offset = wall + crown + (row == 0 ? 2.0f : 15.0f) + 5.0f * treeRand(seed * 3 + 3);
+        Vec3 right = horizontalRight(track,i);
+        const float x = track.samples[i].x + right.x * float(side) * offset;
+        const float z = track.samples[i].z + right.z * float(side) * offset;
+        float d2;
+        const int near = grid.nearestWithin(track,x,z,65.0f,d2);
+        if (near < 0 || d2 < (wall+crown+1.0f)*(wall+crown+1.0f)) return;
+        const float ground = terrain.sample(x,z);
+        const float roadY = roadSurfaceAt(track,near,x,z);
+        if (ground > roadY + 28.0f || !exposed(near,x,z,ground,treeHeight)) return;
+        if (broad) addBroadleaf(mesh,x,z,ground-0.3f,seed,treeHeight);
+        else addConifer(mesh,x,z,ground-0.3f,seed,treeHeight,row == 0 ? 0 : 1);
+    };
+    float lastNear = -1.0e6f, lastBack = -1.0e6f, lastShrub = -1.0e6f;
+    for (int i=0; i<n; ++i) {
+        const float s = track.samples[i].s;
+        if (s - lastNear >= 15.0f) {
+            lastNear = s;
+            for (int side : {-1,1}) place(i,side,0);
+        }
+        if (s - lastBack >= 36.0f) {
+            lastBack = s;
+            for (int side : {-1,1}) place(i,side,1);
+        }
+        if (s - lastShrub >= 24.0f) {
+            lastShrub = s;
+            for (int side : {-1,1}) {
+                const int seed = i*17 + (side > 0 ? 7 : 11);
+                if (treeRand(seed*3+1) > 0.70f) continue;
+                const float radius = 2.4f + 1.6f * treeRand(seed*3+2);
+                const float crown = radius * 1.42f;
+                const float offset = wall + crown + 2.5f;
+                Vec3 right = horizontalRight(track,i);
+                const float x = track.samples[i].x + right.x * float(side) * offset;
+                const float z = track.samples[i].z + right.z * float(side) * offset;
+                float d2; int near=grid.nearestWithin(track,x,z,35.0f,d2);
+                if (near < 0 || d2 < (wall+crown+1.5f)*(wall+crown+1.5f)) continue;
+                const float ground = terrain.sample(x,z);
+                if (ground > roadSurfaceAt(track,near,x,z)+10.0f) continue;
+                if (!exposed(near,x,z,ground,radius*0.85f)) continue;
+                addShrub(mesh,x,z,ground-0.1f,radius,seed);
+            }
+        }
+    }
+}
+
 }  // namespace
 
 bool Track::load(const std::string& path) {
@@ -665,7 +1144,15 @@ bool Track::load(const std::string& path) {
 
     visual = CpuMesh{};
     addGround(visual, *this, touge ? Vec3{0.08f, 0.20f, 0.08f} : Vec3{0.12f, 0.27f, 0.11f});
-    if (!closed) {
+    SampleGrid sampleGrid;
+    Terrain terrain;
+    const bool mountainForest = !closed && touge;
+    if (mountainForest) {
+        // 山岳地形（高さ場）。近くは路面の下、離れるほど立ち上がり、遠くは稜線で視界を塞ぐ。
+        sampleGrid.build(*this);
+        terrain = buildTerrain(*this, sampleGrid);
+        addTerrainMesh(visual, terrain);
+    } else if (!closed) {
         addMountain(visual, *this);
     }
     const float curbOuter = halfWidth + curbWidth;
@@ -680,8 +1167,12 @@ bool Track::load(const std::string& path) {
         addRibbon(visual, *this, -halfWidth, halfWidth, {0.15f, 0.15f, 0.16f}, false);
         addRoadMarkings(visual, *this);
         addGuardrails(visual, *this);
-        addTrees(visual, *this);
-        addBackdropRidges(visual, *this);
+        if (mountainForest) {
+            addForest(visual, *this, terrain, sampleGrid);
+        } else {
+            addTrees(visual, *this);
+            addBackdropRidges(visual, *this);
+        }
     } else {
         addRibbon(visual, *this, -grassOuter, -curbOuter, {0.15f, 0.36f, 0.14f}, true);
         addRibbon(visual, *this, curbOuter, grassOuter, {0.15f, 0.36f, 0.14f}, true);

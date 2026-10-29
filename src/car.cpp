@@ -7,7 +7,7 @@ namespace {
 constexpr float kMaxSpeed = 160.0f / 3.6f;
 constexpr float kMaxReverse = 9.0f;
 constexpr float kAccel = 15.0f;
-constexpr float kBrake = 30.0f;
+constexpr float kBrake = 12.0f;
 constexpr float kReverseAccel = 8.0f;
 constexpr float kDrag = 0.00028f;
 constexpr float kRolling = 0.9f;
@@ -53,6 +53,9 @@ void Car::reset(const Track& track) {
     wheelSpin = 0;
     brakeHold = 0;
     onAsphalt = true;
+    wallContact = false;
+    wallNewContact = false;
+    wallImpact = wallAlongSpeed = wallSide = 0;
     velX = 0;
     velZ = 0;
     velForward = 0;
@@ -96,17 +99,21 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
     const float overload = std::tanh(std::max(0.0f, std::fabs(demand) / baseLimit - 1.0f)) *
         clampf((std::fabs(steerInput) - 0.70f) / 0.30f, 0.0f, 1.0f) *
         clampf((steerHold - 0.30f) / 0.60f, 0.0f, 1.0f);
-    const float slideHold = slideMaturity * clampf((input.throttle - 0.2f) / 0.4f, 0.0f, 1.0f);
-    const float release = std::max(std::max(overload, input.handbrake ? 1.0f : 0.0f), slideHold);
-    const float handbrakeGrip = input.handbrake ? 0.40f : 0.0f;
+    const float brakeSlide = clampf(input.brake, 0.0f, 1.0f) *
+        clampf((std::fabs(steerInput) - 0.15f) / 0.50f, 0.0f, 1.0f) *
+        clampf((vF - 3.0f) / 7.0f, 0.0f, 1.0f);
+    const float coastHold = input.handbrake ? 0.0f : 0.35f * (1.0f - clampf(input.brake, 0.0f, 1.0f));
+    const float slideHold = slideMaturity * std::max(coastHold, clampf((input.throttle - 0.2f) / 0.4f, 0.0f, 1.0f));
+    const float release = std::max(std::max(overload, input.handbrake ? 1.0f : brakeSlide), slideHold);
+    const float handbrakeGrip = input.handbrake ? 0.40f : 0.20f * brakeSlide;
     const float gripTarget = (onAsphalt ? kGripAsphalt : kGripGrass) * (1.0f - 0.30f * release - handbrakeGrip);
     gripLat = approachExp(gripLat, gripTarget, 5.0f, dt);
 
     // Body attitude grows towards a slip angle; velocity is never rotated by yaw.
     const float moving = clampf(mag / 5.0f, 0.0f, 1.0f);
-    const float steeringSlip = (0.65f * release + (input.handbrake ? 0.15f : 0.0f)) * steerInput * moving;
+    const float steeringSlip = (0.65f * release + (input.handbrake ? 0.15f : 0.10f * brakeSlide)) * steerInput * moving;
     const bool counter = steerInput * slip > 0;
-    const float maintainedSlip = -slip * (1.08f - (counter ? 0.70f * std::fabs(steerInput) : 0.0f));
+    const float maintainedSlip = -slip * (1.08f - (counter ? 0.78f * std::fabs(steerInput) : 0.0f));
     const float holding = slideHold * (counter ? 1.0f : 1.0f - std::fabs(steerInput));
     const float desiredSlip = steeringSlip * (1.0f - holding) + maintainedSlip * holding;
     // Releasing or countersteering reduces how hard the slide pulls the path inward.
@@ -154,16 +161,16 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
     const float lateralAccel = -limit * std::tanh(gripLat * lateral / limit) * cornerScale;
     const float lateralBefore = lateral;
     lateral += clampf(lateralAccel * dt, -std::fabs(lateral), std::fabs(lateral));
-    // Arcade drift drive offsets part of tyre scrub under throttle.
-    // It returns only dissipated energy, never adds a minimum speed or cancels braking.
-    if (forward > 3.0f && input.brake <= 0.05f) {
-        const float assist = (input.handbrake ? 0.65f : 0.90f) * driftAmount * clampf(input.throttle, 0.0f, 1.0f);
+    // Arcade coasting retains part of lateral-slip energy as forward motion.
+    // It cannot increase total energy or cancel the separate braking force.
+    if (forward > 3.0f) {
+        const float coastAssist = input.brake > 0.05f ? 0.45f : 0.55f + 0.35f * clampf(input.throttle, 0.0f, 1.0f);
+        const float assist = (input.handbrake ? 0.65f * clampf(input.throttle, 0.0f, 1.0f) : coastAssist) * driftAmount;
         const float lostEnergy = std::max(0.0f, lateralBefore * lateralBefore - lateral * lateral);
         forward = std::sqrt(forward * forward + assist * lostEnergy);
     }
     // Extra scrub grows continuously above the sustained drift speed.
-    const float powerScrub = 6.0f - 2.0f * clampf(input.throttle, 0.0f, 1.0f) *
-        ((input.handbrake || input.brake > 0.05f) ? 0.0f : 1.0f);
+    const float powerScrub = input.handbrake ? 6.0f : 4.0f;
     const float scrub = driftAmount * powerScrub * std::max(0.0f, mag - 30.0f);
     forward *= std::exp(-scrub / std::max(mag, 1.0f) * dt);
     velX = nfx * forward + nfz * lateral;
@@ -196,6 +203,10 @@ void Car::update(float dt, const DriveInput& input, const Track& track) {
     }
 
     if (dt <= 0.0f) return;
+    const bool wasWallContact = wallContact;
+    wallContact = false;
+    wallNewContact = false;
+    wallImpact = wallAlongSpeed = wallSide = 0;
     const float restoreMix = driftAmount;
     float steerLimit = maxSteerAt(groundSpeed()) * (1.0f + 0.35f * restoreMix);
     // Smooth the same steering command for wheels and drift attitude; keyboard keys are binary.
@@ -286,25 +297,38 @@ void Car::update(float dt, const DriveInput& input, const Track& track) {
     }
 
     const float wall = track.wallLateral();
-    if (std::fabs(ground.lateral) > wall) {
-        float sign = ground.lateral > 0 ? 1.0f : -1.0f;
-        float overflow = std::fabs(ground.lateral) - wall;
+    const float sign = ground.lateral >= 0 ? 1.0f : -1.0f;
+    const float outward = (velX * ground.rightX + velZ * ground.rightZ) * sign;
+    const bool crossedWall = std::fabs(ground.lateral) > wall;
+    // Keep contact while moving tangentially, but release promptly when steering away.
+    const bool brushing = std::fabs(ground.lateral) >= wall - 0.05f &&
+                          (outward > 0.01f || (wasWallContact && outward > -0.2f));
+    if (crossedWall || brushing) {
+        wallContact = true;
+        wallNewContact = !wasWallContact;
+        wallSide = sign;
+        wallImpact = std::max(0.0f, outward);
+        const float overflow = std::max(0.0f, std::fabs(ground.lateral) - wall);
         x -= ground.rightX * sign * overflow;
         z -= ground.rightZ * sign * overflow;
-        // 壁の外へ向かう速度成分は落とす。ドリフトで横向きに当たっても
-        // 壁に張り付かず、コースに沿う成分だけ残して擦りながら進める。
-        float outVel = (velX * ground.rightX + velZ * ground.rightZ) * sign;
-        if (outVel > 0) {
-            velX -= ground.rightX * sign * outVel * 0.9f;
-            velZ -= ground.rightZ * sign * outVel * 0.9f;
+        if (outward > 0) {
+            velX -= ground.rightX * sign * outward * 0.9f;
+            velZ -= ground.rightZ * sign * outward * 0.9f;
         }
-        // 壁処理のあとはベクトルとスカラーを一致させる。
+        // Friction acts on motion along the rail, not on the entire speed vector.
+        const float nx = ground.rightX * sign, nz = ground.rightZ * sign;
+        const float normalSpeed = velX * nx + velZ * nz;
+        const float tx = velX - nx * normalSpeed, tz = velZ - nz * normalSpeed;
+        wallAlongSpeed = std::sqrt(tx * tx + tz * tz);
+        const float keep = std::exp(-0.45f * dt);
+        velX = nx * normalSpeed + tx * keep;
+        velZ = nz * normalSpeed + tz * keep;
         const float fx = std::sin(yaw), fz = std::cos(yaw);
         const float rx = std::cos(yaw), rz = -std::sin(yaw);
         velForward = velX * fx + velZ * fz;
         velLateral = velX * rx + velZ * rz;
         speed = velForward;
-        ground.lateral = sign * wall;
+        ground.lateral = sign * std::min(std::fabs(ground.lateral), wall);
     }
 
     float bankLimit = track.halfWidth + track.curbWidth;

@@ -27,7 +27,7 @@ struct Renderer {
                    const Mat4& viewProj);
     // 光の軌跡などの加算グロー用。頂点は [xyz, r, g, b, alpha] の 7 float。
     void drawGlow(const float* verts, int vertCount, const unsigned* indices, int indexCount,
-                  const Mat4& viewProj);
+                  const Mat4& viewProj, bool additive = true);
     void beginHud();
     void addQuad(float x0, float y0, float x1, float y1, float r, float g, float b, float a);
     void drawLine(float x0, float y0, float x1, float y1, float thickness, float r, float g, float b, float a);

@@ -26,6 +26,12 @@ struct Car {
     float wheelSpin = 0;
     float brakeHold = 0;    // 止まってから後退に入るまでの待ち時間
     bool onAsphalt = true;
+    bool wallContact = false;  // Current physics step is touching the guardrail.
+    bool wallNewContact = false; // First step of a contact, for the initial spark burst.
+    float wallImpact = 0;      // Inward impact speed (m/s).
+    float wallAlongSpeed = 0;  // Tangential speed before wall friction (m/s).
+    float wallSide = 0;        // -1 left, +1 right relative to the track.
+
     TrackPose ground;
 
     // --- ドリフト用の状態 ---------------------------------------------------

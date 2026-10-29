@@ -54,7 +54,7 @@ void main() {
     float light = 0.36 + 0.64 * max(dot(n, sun), 0.0);
     vec3 color = vColor * light;
     float dist = distance(vWorld, uCamPos);
-    float fog = clamp((dist - 90.0) / 1500.0, 0.0, 1.0);
+    float fog = clamp((dist - 60.0) / 900.0, 0.0, 1.0);
     vec3 haze = vec3(0.62, 0.74, 0.84);
     fragColor = vec4(mix(color, haze, fog), 1.0);
 }
@@ -356,14 +356,14 @@ void Renderer::drawSmoke(const float* verts, int vertCount, const unsigned* indi
 }
 
 void Renderer::drawGlow(const float* verts, int vertCount, const unsigned* indices,
-                        int indexCount, const Mat4& viewProj) {
+                        int indexCount, const Mat4& viewProj, bool additive) {
     if (indexCount <= 0 || vertCount <= 0 || !glowProgram) {
         return;
     }
     // 加算合成で光の筋に見せる。深度は読むだけ（書き込まない）。
     // 不透明物と煙の後に呼ぶこと。
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glBlendFunc(GL_SRC_ALPHA, additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
     glDepthMask(GL_FALSE);
     glUseProgram(glowProgram);
     glUniformMatrix4fv(uGlowViewProj, 1, GL_FALSE, viewProj.m);

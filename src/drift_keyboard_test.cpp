@@ -46,7 +46,8 @@ int main() {
     wallEnabled = false; free.update(1.f/60,in,track);
     wallEnabled = true; start.update(1.f/60,in,track);
     assert(start.ground.lateral == track.wallLateral());
-    assert(std::fabs(start.velZ - free.velZ) < 0.01f); // preserve tangent velocity
+    assert(start.wallContact && start.wallNewContact && start.wallImpact>0);
+    assert(start.velZ < free.velZ && start.velZ > free.velZ * .98f); // mild tangential friction
     assert(start.velX < free.velX);
     std::puts("PASS: keyboard drift entry/hold/counter/exit, 1.25x real-time pacing, wall tangential velocity");
 }

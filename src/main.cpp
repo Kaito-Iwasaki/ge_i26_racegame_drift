@@ -2,6 +2,7 @@
 #include "render.hpp"
 #include "lighttrail.hpp"
 #include "smoke.hpp"
+#include "effects.hpp"
 #include "sound.hpp"
 #include "track.hpp"
 
@@ -80,6 +81,9 @@ struct App {
     Race race;
     Orbit camera;
     SmokeSystem smoke;
+    SurfaceEffects surfaceEffects;
+    std::vector<float> surfaceVerts;
+    std::vector<unsigned> surfaceIndices;
     std::vector<float> smokeVerts;
     std::vector<unsigned> smokeIndices;
     LightTrail brakeTrail;
@@ -295,6 +299,7 @@ void resetRace(App& app) {
     app.race = Race{};
     app.camera.ready = false;
     app.smoke.clear();
+    app.surfaceEffects.clear();
     app.brakeTrail.clear();
 }
 
@@ -600,6 +605,24 @@ void frame(void* userdata) {
         int guard = 0;
         while (app.accumulator >= kFixedStepSec && guard < 8) {
             app.car.update(float(kFixedStepSec) * kDrivingPace, input, app.track);
+            // Emit on every physics step so brief collisions are not lost between frames.
+            const float effectDt = float(kFixedStepSec);
+            Vec3 carVel{app.car.velX, 0, app.car.velZ};
+            if (app.car.wallContact) {
+                Vec3 inward{-app.car.ground.rightX * app.car.wallSide, 0,
+                            -app.car.ground.rightZ * app.car.wallSide};
+                Vec3 point{app.car.x, app.car.y + 0.55f, app.car.z};
+                app.surfaceEffects.emitSparks(point, carVel, inward, app.car.wallImpact,
+                                              app.car.wallAlongSpeed, effectDt, app.car.wallNewContact);
+            }
+            if (app.car.ground.found && !app.car.onAsphalt && app.car.groundSpeed() > 2.0f) {
+                Vec3 fwd{std::sin(app.car.yaw), 0, std::cos(app.car.yaw)};
+                Vec3 right{fwd.z, 0, -fwd.x};
+                Vec3 rear{app.car.x, app.car.y + 0.12f, app.car.z};
+                rear = rear - fwd * 1.38f;
+                app.surfaceEffects.emitMud(rear - right * 0.82f, rear + right * 0.82f,
+                                           carVel, app.car.groundSpeed(), effectDt);
+            }
             tickRace(app.race, app.car.ground.s, app.track.length, float(kFixedStepSec), app.track.closed);
             app.accumulator -= kFixedStepSec;
             ++guard;
@@ -649,6 +672,7 @@ void frame(void* userdata) {
                            float(elapsed));
         }
         app.smoke.update(float(elapsed));
+        app.surfaceEffects.update(float(elapsed));
     }
 
     int drawableW = 0;
@@ -696,6 +720,17 @@ void frame(void* userdata) {
                                static_cast<int>(app.smokeVerts.size() / 6),
                                app.smokeIndices.data(), static_cast<int>(app.smokeIndices.size()),
                                viewProj);
+    }
+    // Mud uses normal alpha blending; sparks use the existing additive glow shader.
+    {
+        Vec3 camFwd = normalize(app.camera.look - app.camera.eye);
+        Vec3 camRight = normalize(cross(camFwd, Vec3{0, 1, 0}));
+        Vec3 camUp = cross(camRight, camFwd);
+        for (bool sparks : {false, true}) {
+            app.surfaceEffects.buildQuads(camRight, camUp, sparks, app.surfaceVerts, app.surfaceIndices);
+            app.renderer.drawGlow(app.surfaceVerts.data(), int(app.surfaceVerts.size() / 7),
+                                  app.surfaceIndices.data(), int(app.surfaceIndices.size()), viewProj, sparks);
+        }
     }
     // ブレーキランプの光の軌跡は加算グローで煙の後に重ねる。
     {
