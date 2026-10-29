@@ -359,16 +359,19 @@ void resetRace(App& app) {
 }
 
 // Project each rear tyre onto the nearest road surface, including camber.
-void recordBrakeMarks(App& app, const DriveInput& input) {
-    const bool active = brakeLightsActive(input, app.car.speed) && app.car.groundSpeed() > 2.0f &&
-                        app.car.ground.found;
+void recordTyreMarks(App& app, const DriveInput& input) {
+    const bool braking = brakeLightsActive(input, app.car.speed);
+    const bool sliding = app.car.drifting && std::fabs(app.car.slipAngle) > 0.12f;
+    const bool active = (braking || sliding) && app.car.groundSpeed() > 2.0f && app.car.ground.found;
     if (!active) {
         for (int i=0;i<2;++i) app.skidMarks.sample(i, false, {}, 0);
         return;
     }
     const Vec3 fwd{std::sin(app.car.yaw),0,std::cos(app.car.yaw)};
     const Vec3 right{fwd.z,0,-fwd.x};
-    const float strength = input.handbrake ? 1.0f : clampf(input.brake,0.0f,1.0f);
+    const float brakeStrength = input.handbrake ? 1.0f : (braking ? clampf(input.brake,0.0f,1.0f) : 0.0f);
+    const float driftStrength = sliding ? clampf((std::fabs(app.car.slipAngle) - 0.12f) / 0.45f, 0.15f, 1.0f) : 0.0f;
+    const float strength = std::max(brakeStrength, driftStrength);
     for (int wheel=0; wheel<2; ++wheel) {
         const float side=wheel==0 ? -1.0f : 1.0f;
         const Vec3 center=Vec3{app.car.x,app.car.y,app.car.z}-fwd*1.38f+right*(side*0.82f);
@@ -685,7 +688,7 @@ void frame(void* userdata) {
                 continue;
             }
             app.car.update(float(kFixedStepSec) * kDrivingPace, input, app.track);
-            recordBrakeMarks(app, input);
+            recordTyreMarks(app, input);
             // Emit on every physics step so brief collisions are not lost between frames.
             const float effectDt = float(kFixedStepSec);
             Vec3 carVel{app.car.velX, 0, app.car.velZ};
