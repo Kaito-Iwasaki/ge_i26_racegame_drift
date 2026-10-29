@@ -41,6 +41,8 @@ struct Car {
     float driftTime = 0;      // 現在継続中のドリフト時間 (s)
     float driftScore = 0;     // 累計スコア。速く・大きく滑るほど増える
     float gripLat = 9.0f;     // 現在の横グリップ係数 (1/s)。目標値へ滑らかに変化する
+    float slideEntryTime = 0; // Seconds since a meaningful slide began
+    float brakeDriftMix = 0; // Preserves brake-initiated behavior after release
     float driftAmount = 0;  // Continuous physical slip blend, 0..1
 
     void reset(const Track& track);

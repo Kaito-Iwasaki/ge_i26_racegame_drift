@@ -64,6 +64,8 @@ void Car::reset(const Track& track) {
     driftScore = 0;
     gripLat = kGripAsphalt;
     driftAmount = 0;
+    slideEntryTime = 0;
+    brakeDriftMix = 0;
     ground = track.query(x, z, y);
 }
 
@@ -81,6 +83,9 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
     // Arcade cornering support grows with slip; initiation uses the base grip limit.
     const float baseLimit = kLateralLimit * (onAsphalt ? 1.0f : 0.55f);
     const float slideMaturity = driftAmount * clampf((std::fabs(slip) - 0.12f) / 0.10f, 0.0f, 1.0f);
+    slideEntryTime = slideMaturity > 0.15f ? std::min(slideEntryTime + dt, 2.0f) : 0.0f;
+    const bool braking = input.handbrake || input.brake > 0.05f;
+    brakeDriftMix = braking ? 1.0f : approachExp(brakeDriftMix, 0.0f, 2.0f, dt);
     const float limit = baseLimit + (onAsphalt ? kDriftCornerAssist : 12.0f) * slideMaturity;
     const float demand = vF * vF / kWheelbase * std::tan(steerAngle);
     const float overload = std::tanh(std::max(0.0f, std::fabs(demand) / baseLimit - 1.0f)) *
@@ -96,12 +101,14 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
     const float moving = clampf(mag / 5.0f, 0.0f, 1.0f);
     const float steeringSlip = (0.65f * release + (input.handbrake ? 0.15f : 0.0f)) * steerInput * moving;
     const bool counter = steerInput * slip > 0;
-    const float maintainedSlip = -slip * (1.08f - (counter ? 0.50f * std::fabs(steerInput) : 0.0f));
+    const float maintainedSlip = -slip * (1.08f - (counter ? 0.70f * std::fabs(steerInput) : 0.0f));
     const float holding = slideHold * (counter ? 1.0f : 1.0f - std::fabs(steerInput));
     const float desiredSlip = steeringSlip * (1.0f - holding) + maintainedSlip * holding;
     // Releasing or countersteering reduces how hard the slide pulls the path inward.
     const float aligned = clampf(-steerInput * std::tanh(slip / 0.10f), 0.0f, 1.0f);
-    const float cornerScale = 1.0f - 0.65f * slideMaturity * (1.0f - aligned);
+    const float entryFade = 1.0f - clampf((slideEntryTime - 0.4f) / 0.6f, 0.0f, 1.0f);
+    const float straightEntry = 0.25f * slideMaturity * entryFade * (1.0f - brakeDriftMix);
+    const float cornerScale = (1.0f - 0.65f * slideMaturity * (1.0f - aligned)) * (1.0f - straightEntry);
     const float tyreAccel = -limit * std::tanh(gripLat * vL / limit) * cornerScale;
     const float pathRate = tyreAccel * vF / std::max(mag * mag, 1.0f);
     const float bicycle = vF / kWheelbase * std::tan(steerAngle);
@@ -123,12 +130,14 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
     // Arcade drift drive offsets part of tyre scrub under throttle.
     // It returns only dissipated energy, never adds a minimum speed or cancels braking.
     if (forward > 3.0f && input.brake <= 0.05f) {
-        const float assist = (input.handbrake ? 0.65f : 0.85f) * driftAmount * clampf(input.throttle, 0.0f, 1.0f);
+        const float assist = (input.handbrake ? 0.65f : 0.90f) * driftAmount * clampf(input.throttle, 0.0f, 1.0f);
         const float lostEnergy = std::max(0.0f, lateralBefore * lateralBefore - lateral * lateral);
         forward = std::sqrt(forward * forward + assist * lostEnergy);
     }
     // Extra scrub grows continuously above the sustained drift speed.
-    const float scrub = driftAmount * 6.0f * std::max(0.0f, mag - 30.0f);
+    const float powerScrub = 6.0f - 2.0f * clampf(input.throttle, 0.0f, 1.0f) *
+        ((input.handbrake || input.brake > 0.05f) ? 0.0f : 1.0f);
+    const float scrub = driftAmount * powerScrub * std::max(0.0f, mag - 30.0f);
     forward *= std::exp(-scrub / std::max(mag, 1.0f) * dt);
     velX = nfx * forward + nfz * lateral;
     velZ = nfz * forward - nfx * lateral;

@@ -21,7 +21,7 @@ int main() {
             DriveInput steer; steer.steer = side; steer.throttle = 1;
             run(entry, steer, dt, 1.2f);
             assert(entry.drifting && std::fabs(entry.slipAngle) > 0.40f);
-            assert(entry.groundSpeed()*3.6f > 100 && entry.groundSpeed()*3.6f < 125);
+            assert(entry.groundSpeed()*3.6f > 100 && entry.groundSpeed()*3.6f < 132);
             Car neutral = entry; DriveInput hold; hold.throttle = 1;
             run(neutral, hold, dt, 0.5f);
             assert(neutral.drifting && std::fabs(neutral.slipAngle) > 0.25f);
