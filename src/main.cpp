@@ -39,9 +39,24 @@ struct Race {
 struct Orbit {
     Vec3 eye{0, 8, -12};
     Vec3 look{0, 0, 0};
+    Vec3 anchor{0, 0, 0};  // 追従中の「カメラが見ている車の位置」（慣性で遅れる）
+    float yaw = 0;         // 追従中のカメラの向き（慣性で遅れる）
     bool ready = false;
     int mode = 0;
 };
+
+// カメラ追従の慣性の調整用。値を変えるだけで挙動が変わる。
+//   inertia = 0   : 車体に完全固定（リジッド）。頭文字D ARCADE STAGE そのまま。
+//   inertia = 0.2 : ほんの少しだけ遅れる（既定）。加速で少し引き、ドリフトで少し遅れて回る。
+//   inertia = 1   : 以下の Max の時間だけ遅れる、かなり緩い追従。
+// 時間は「追いつくまでの時定数（秒）」。大きいほど遅れる。
+struct CameraTuning {
+    float inertia = 0.05f;     // 0..1。まずここだけ触ればよい
+    float yawLagMax = 0.35f;   // inertia=1 のときの向きの遅れ（秒）
+    float posLagMax = 0.25f;   // inertia=1 のときの位置の遅れ（秒）
+    float heightLag = 0.08f;   // 上下の均し（秒）。路面のうねりで画面が跳ねないように。慣性とは独立
+};
+CameraTuning gCameraTuning;
 
 struct App {
     SDL_Window* window = nullptr;
@@ -54,8 +69,10 @@ struct App {
     Car car;
     GpuMesh course;
     GpuMesh body;
+    GpuMesh brakeLights;
     GpuMesh wheel;
     GpuMesh shadow;
+    bool braking = false;  // 今フレームのブレーキ入力（ブレーキランプ点灯用）
     Race race;
     Orbit camera;
     SmokeSystem smoke;
@@ -313,25 +330,36 @@ void updateCamera(App& app, float dt) {
     const float up[3] = {3.3f, 1.55f, 7.2f};
     const float ahead[3] = {9.0f, 6.0f, 14.0f};
     int mode = app.camera.mode;
-    // ドリフト中は車体の向きと進行方向がずれる。カメラはその中間を向いて、
-    // ノーズの先ではなく「これから進む先」が画面に入るようにする。
-    float camYaw = app.car.yaw + app.car.slipAngle * 0.45f;
-    Vec3 forward{std::sin(camYaw), 0, std::cos(camYaw)};
-    Vec3 eye = Vec3{app.car.x, app.car.y, app.car.z} - forward * back[mode] + Vec3{0, up[mode], 0};
-    Vec3 look = Vec3{app.car.x, app.car.y, app.car.z} + forward * ahead[mode] + Vec3{0, 1.15f, 0};
+    const CameraTuning& tune = gCameraTuning;
+    const float inertia = clampf(tune.inertia, 0.0f, 1.0f);
+    // 時定数 tau (秒) からこのフレームの追従率を作る。tau が 0 なら即追従。
+    auto follow = [&](float tau) {
+        return (tau <= 1e-4f || dt <= 0.0f) ? 1.0f : 1.0f - std::exp(-dt / tau);
+    };
+    Orbit& cam = app.camera;
+    Vec3 carPos{app.car.x, app.car.y, app.car.z};
+    if (!cam.ready) {
+        cam.anchor = carPos;
+        cam.yaw = app.car.yaw;
+    } else {
+        // 向きは角度の最短側へ、位置は水平だけ慣性で遅らせる。上下は慣性と別に軽く均す。
+        cam.yaw += wrapPi(app.car.yaw - cam.yaw) * follow(inertia * tune.yawLagMax);
+        float posK = follow(inertia * tune.posLagMax);
+        cam.anchor.x += (carPos.x - cam.anchor.x) * posK;
+        cam.anchor.z += (carPos.z - cam.anchor.z) * posK;
+        cam.anchor.y += (carPos.y - cam.anchor.y) * follow(tune.heightLag);
+    }
+    // 頭文字D ARCADE STAGE 風: 基本は車の真後ろ。inertia が小さいほど車体に固定される。
+    Vec3 forward{std::sin(cam.yaw), 0, std::cos(cam.yaw)};
+    Vec3 eye = cam.anchor - forward * back[mode] + Vec3{0, up[mode], 0};
+    Vec3 look = cam.anchor + forward * ahead[mode] + Vec3{0, 1.15f, 0};
     TrackPose under = app.track.query(eye.x, eye.z, app.car.y, app.car.ground.s);
     if (under.found && under.xzDist < 30.0f && eye.y < under.centerY + 0.8f) {
         eye.y = under.centerY + 0.8f;
     }
-    if (!app.camera.ready) {
-        app.camera.eye = eye;
-        app.camera.look = look;
-        app.camera.ready = true;
-        return;
-    }
-    float blend = 1.0f - std::exp(-dt * 7.0f);
-    app.camera.eye = app.camera.eye + (eye - app.camera.eye) * blend;
-    app.camera.look = app.camera.look + (look - app.camera.look) * blend;
+    cam.eye = eye;
+    cam.look = look;
+    cam.ready = true;
 }
 
 void drawMinimap(App& app) {
@@ -574,6 +602,9 @@ void frame(void* userdata) {
     soundState.rpm01 = app.engineVoice.update(std::fabs(app.car.speed), input.throttle,
                                               app.car.drifting, app.paused, float(elapsed));
     app.sound.update(soundState);
+    // 前進中（または停止中）にブレーキを踏んでいる間だけランプを点灯する。
+    // 後退中のブレーキ入力は「バックの加速」なので点けない。
+    app.braking = input.brake > 0.05f && app.car.speed > -0.5f;
     updateCamera(app, float(elapsed));
 
     // ドリフト中は後輪の接地点からタイヤ煙を出す。物理ステップとは独立に
@@ -617,6 +648,9 @@ void frame(void* userdata) {
     float roll = std::atan(app.car.ground.cross);
     Mat4 model = carModelMatrix(app.car, pitch, roll);
     app.renderer.draw(app.body, model);
+    if (app.braking) {
+        app.renderer.draw(app.brakeLights, model);
+    }
     const float wheelX = 0.82f;
     const float wheelZ[2] = {1.42f, -1.38f};
     const float steerForWheel[2] = {app.car.steerAngle, 0};
@@ -802,12 +836,15 @@ int main(int argc, char** argv) {
     app.sound.init();
     app.course = app.renderer.upload(app.track.visual);
     CpuMesh body;
+    CpuMesh brakeLights;
     CpuMesh wheel;
     CpuMesh shadow;
     buildCarBody(body);
+    buildCarBrakeLights(brakeLights);
     buildCarWheel(wheel);
     buildCarShadow(shadow);
     app.body = app.renderer.upload(body);
+    app.brakeLights = app.renderer.upload(brakeLights);
     app.wheel = app.renderer.upload(wheel);
     app.shadow = app.renderer.upload(shadow);
     app.car.reset(app.track);

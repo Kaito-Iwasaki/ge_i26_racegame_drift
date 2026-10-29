@@ -602,6 +602,14 @@ void buildCarBody(CpuMesh& mesh) {
     mesh.addBox({0.48f, 0.14f, -2.20f}, {0.68f, 0.24f, -2.02f}, steel);
 }
 
+void buildCarBrakeLights(CpuMesh& mesh) {
+    // 色は 1 を超えてよい（シェーダーの陰影 0.36〜 を掛けても明るい赤になり、
+    // 通常の暗いテール（0.70, 0.05, 0.06）との差がはっきり出る）。
+    const Vec3 lit{3.0f, 0.18f, 0.14f};
+    mesh.addBox({0.295f, 0.625f, -2.045f}, {0.775f, 0.775f, -1.955f}, lit);
+    mesh.addBox({-0.775f, 0.625f, -2.045f}, {-0.295f, 0.775f, -1.955f}, lit);
+}
+
 void buildCarWheel(CpuMesh& mesh) {
     const int seg = 14;
     const float radius = 0.34f;
