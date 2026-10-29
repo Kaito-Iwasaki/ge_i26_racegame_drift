@@ -45,6 +45,10 @@ struct Car {
     float brakeDriftMix = 0; // Preserves brake-initiated behavior after release
     float driftAmount = 0;  // Continuous physical slip blend, 0..1
     float bodyRoll = 0;     // 車体の視覚ロール (rad)。ハンドル＋横Gで外側へ傾く。正＝車体上部が左へ
+    float bodyRollVel = 0;  // ロールの角速度。バネ・ダンパーで重心の揺れを出す
+    float bodyPitch = 0;    // 車体の視覚ピッチ (rad)。加減速の荷重移動。正＝加速でノーズが上がる
+    float longG = 0;        // 平滑化した前後G (m/s^2)。ピッチの駆動に使う
+    float prevVF = 0;       // 前ステップの前進速度（前後Gの算出用）
 
     void reset(const Track& track);
     void update(float dt, const DriveInput& input, const Track& track);

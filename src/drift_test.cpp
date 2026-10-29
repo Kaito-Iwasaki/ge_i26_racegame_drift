@@ -503,8 +503,20 @@ int main() {
         left.throttle = 0.6f;
         run(car, track, left, 1.2f);
         check(car.bodyRoll < -0.02f, "body roll: leans out on left steer", car.bodyRoll);
-        check(std::fabs(car.bodyRoll) <= 0.131f, "body roll: stays within cap", car.bodyRoll);
+        check(std::fabs(car.bodyRoll) <= 0.10f, "body roll: stays within cap", car.bodyRoll);
         (void)rightRoll;
+        // 重心の荷重移動：加速でノーズが上がり、制動で前のめりになる
+        Car car2;
+        car2.reset(track);
+        DriveInput launch;
+        launch.throttle = 1.0f;
+        run(car2, track, launch, 1.0f);
+        check(car2.bodyPitch > 0.004f, "body pitch: squats under acceleration", car2.bodyPitch);
+        accelerateTo(car2, track, 25.0f);
+        DriveInput brake;
+        brake.brake = 1.0f;
+        run(car2, track, brake, 0.6f);
+        check(car2.bodyPitch < -0.004f, "body pitch: dives under braking", car2.bodyPitch);
     }
 
     std::printf(failures == 0 ? "\nALL PASS\n" : "\n%d FAILURES\n", failures);

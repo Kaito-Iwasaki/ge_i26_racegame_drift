@@ -46,9 +46,9 @@ int main() {
         }
         check(trail.nodes.size() == 10, "records kept (1 m spacing)", float(trail.nodes.size()));
         trail.buildQuads(verts, idx);
-        // 9 区間 × 3 クワッド × 4 頂点 = 108 頂点、9×3×6 = 162 インデックス
-        check(verts.size() == 108 * 7, "quad vertex count (7 floats each)", float(verts.size()));
-        check(idx.size() == 162, "quad index count", float(idx.size()));
+        // 9 区間 × 2 リボン（左右別々）× 4 頂点 = 72 頂点、9×2×6 = 108 インデックス
+        check(verts.size() == 72 * 7, "quad vertex count (7 floats each)", float(verts.size()));
+        check(idx.size() == 108, "quad index count", float(idx.size()));
         check(finite(verts), "all vertices finite", 1);
         bool idxOk = true;
         for (unsigned i : idx) {

@@ -19,7 +19,7 @@ struct LightTrail {
     static constexpr float kLife = 0.6f;      // 軌跡が残る時間 (s)
     static constexpr int kMaxNodes = 110;     // 履歴の上限（約2秒ぶん）
     static constexpr float kMinSpacing = 0.35f;  // これより近い記録は間引く (m)
-    static constexpr float kRibbonHalf = 0.15f;  // 縦リボンの半分の高さ (m)
+    static constexpr float kRibbonHalf = 0.18f;  // 縦リボンの半分の高さ (m)
 
     std::vector<Node> nodes;  // 古い順 → 新しい順
 
@@ -62,9 +62,8 @@ struct LightTrail {
         return t * t * 0.55f;
     }
 
-    // 連続する記録点の間を面で繋ぐ。左右ランプ間を結ぶ水平シートに加え、
-    // 各ランプ位置に縦リボン（上下 kRibbonHalf）を立てて、後方からも
-    // 横からも光の筋が見えるようにする。
+    // 連続する記録点の間を面で繋ぐ。ランプごとに独立した縦リボン
+    // （上下 kRibbonHalf）を立てるので、軌跡は左右2本の筋になる。
     void buildQuads(std::vector<float>& verts, std::vector<unsigned>& indices) const {
         verts.clear();
         indices.clear();
@@ -90,8 +89,6 @@ struct LightTrail {
             const Node& b = nodes[i + 1];
             float aa = nodeAlpha(a);
             float ab = nodeAlpha(b);
-            // 水平シート（左右ランプ間）
-            quad(a.left, a.right, b.right, b.left, aa, ab);
             // 左ランプの縦リボン
             quad(a.left + down, a.left + up, b.left + up, b.left + down, aa, ab);
             // 右ランプの縦リボン

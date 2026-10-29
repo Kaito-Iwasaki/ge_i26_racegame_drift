@@ -59,6 +59,10 @@ void Car::reset(const Track& track) {
     velLateral = 0;
     yawRate = 0;
     bodyRoll = 0;
+    bodyRollVel = 0;
+    bodyPitch = 0;
+    longG = 0;
+    prevVF = 0;
     slipAngle = 0;
     drifting = false;
     driftTime = 0;
@@ -122,15 +126,27 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
     yawRate += clampf(nextYawRate - yawRate, -5.5f * dt, 5.5f * dt);
     yaw = wrapPi(yaw + yawRate * dt);
 
-    // --- 車体の視覚ロール ---------------------------------------------------
-    // ハンドルを切ると車体が旋回外側へ傾く。入力への即応（steerInput 項）と
-    // 実際の横G（yawRate × 前進速度）の合算で、速度が乗るほど深く傾く。
-    // 符号: 右旋回で bodyRoll>0 ＝上部が左（外側）へ。
+    // --- 車体の視覚ロール／ピッチ（重心の荷重移動） ---------------------------
+    // ロールはバネ・ダンパー（2次系）で駆動し、重さのある車体が遅れて傾き、
+    // わずかに行き過ぎてから落ち着く動きにする。目標角は控えめに抑えた
+    // （最大 ±0.080 rad ≒ 4.6°）。符号: 右旋回で bodyRoll>0 ＝上部が左（外）へ。
+    // ピッチは前後Gから：加速でノーズが上がり（沈み込み）、制動で前のめり。
     {
         float speedFac = clampf(std::fabs(vF) / 15.0f, 0.0f, 1.0f);
         float latG = yawRate * vF;
-        float rollTarget = clampf(steerInput * 0.05f * speedFac + latG * 0.013f, -0.13f, 0.13f);
-        bodyRoll = approachExp(bodyRoll, rollTarget, 8.0f, dt);
+        float rollTarget = clampf(steerInput * 0.028f * speedFac + latG * 0.0058f, -0.080f, 0.080f);
+        const float kSpring = 30.0f;   // ω ≒ 5.5 rad/s
+        const float kDamp = 6.5f;      // ζ ≒ 0.6（わずかな行き過ぎ）
+        bodyRollVel += ((rollTarget - bodyRoll) * kSpring - bodyRollVel * kDamp) * dt;
+        bodyRoll = clampf(bodyRoll + bodyRollVel * dt, -0.10f, 0.10f);
+
+        if (dt > 0.0f) {
+            float instLongG = (vF - prevVF) / dt;
+            longG += (instLongG - longG) * std::min(1.0f, dt * 6.0f);
+        }
+        prevVF = vF;
+        float pitchTarget = clampf(longG * 0.0038f, -0.04f, 0.04f);
+        bodyPitch = approachExp(bodyPitch, pitchTarget, 6.0f, dt);
     }
     const float nfx = std::sin(yaw), nfz = std::cos(yaw);
     float forward = velX * nfx + velZ * nfz;
@@ -414,16 +430,25 @@ void carBasis(const Car& car, float pitch, float roll, Vec3& right, Vec3& up, Ve
     up = normalize(cross(forward, right));
 }
 
+// ロールの回転中心を地面ではなく重心の高さ（床上 0.45 m）に置くための原点補正。
+// 重心位置がロールで横に流れないので、車体が重心を軸に傾く自然な動きになる。
+Vec3 cgOrigin(const Car& car, float pitch, float roll, const Vec3& up) {
+    Vec3 rightBank, upBank, forwardBank;
+    carBasis(car, pitch, roll - car.bodyRoll, rightBank, upBank, forwardBank);
+    const float kCgHeight = 0.45f;
+    return Vec3{car.x, car.y, car.z} + (upBank - up) * kCgHeight;
+}
+
 }  // namespace
 
 Mat4 carModelMatrix(const Car& car, float pitch, float roll) {
     Vec3 right, up, forward;
     carBasis(car, pitch, roll, right, up, forward);
-    return basis({car.x, car.y, car.z}, right, up, forward);
+    return basis(cgOrigin(car, pitch, roll, up), right, up, forward);
 }
 
 Vec3 carPointWorld(const Car& car, float pitch, float roll, Vec3 local) {
     Vec3 right, up, forward;
     carBasis(car, pitch, roll, right, up, forward);
-    return Vec3{car.x, car.y, car.z} + right * local.x + up * local.y + forward * local.z;
+    return cgOrigin(car, pitch, roll, up) + right * local.x + up * local.y + forward * local.z;
 }

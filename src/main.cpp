@@ -621,7 +621,7 @@ void frame(void* userdata) {
 
     // 車体の姿勢（ピッチ＝路面の前後傾斜、ロール＝路面のバンク＋ハンドル
     // による車体の傾き）。描画とブレーキランプ軌跡の両方で使う。
-    float pitch = carPitch(app);
+    float pitch = carPitch(app) + app.car.bodyPitch;
     float roll = std::atan(app.car.ground.cross) + app.car.bodyRoll;
 
     // ブレーキランプ点灯中は、左右ランプの位置を履歴に残して光の軌跡にする。
