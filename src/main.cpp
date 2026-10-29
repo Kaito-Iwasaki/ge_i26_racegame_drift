@@ -26,6 +26,9 @@ namespace {
 
 constexpr double kFixedStepSec = 1.0 / 60.0;
 constexpr double kMaxFrameSec = 0.25;
+// Arcade pace: HUD uses simulation km/h; world motion runs 25% faster.
+// Scale the complete car step to preserve the drift path and steering balance.
+constexpr float kDrivingPace = 1.25f;
 
 struct Race {
     int completed = 0;
@@ -337,13 +340,17 @@ void updateCamera(App& app, float dt) {
         return (tau <= 1e-4f || dt <= 0.0f) ? 1.0f : 1.0f - std::exp(-dt / tau);
     };
     Orbit& cam = app.camera;
+    // Blend towards the direction of travel so the car's sideways attitude is visible.
+    // Fade out at low / reverse speeds, where the velocity heading is unstable.
+    const float cameraSlide = app.car.driftAmount * clampf(app.car.velForward / 8.0f, 0.0f, 1.0f);
+    const float cameraYaw = wrapPi(app.car.yaw + clampf(app.car.slipAngle, -0.75f, 0.75f) * 0.85f * cameraSlide);
     Vec3 carPos{app.car.x, app.car.y, app.car.z};
     if (!cam.ready) {
         cam.anchor = carPos;
-        cam.yaw = app.car.yaw;
+        cam.yaw = cameraYaw;
     } else {
         // 向きは角度の最短側へ、位置は水平だけ慣性で遅らせる。上下は慣性と別に軽く均す。
-        cam.yaw += wrapPi(app.car.yaw - cam.yaw) * follow(inertia * tune.yawLagMax);
+        cam.yaw += wrapPi(cameraYaw - cam.yaw) * follow(inertia * tune.yawLagMax + 0.10f * cameraSlide);
         float posK = follow(inertia * tune.posLagMax);
         cam.anchor.x += (carPos.x - cam.anchor.x) * posK;
         cam.anchor.z += (carPos.z - cam.anchor.z) * posK;
@@ -587,7 +594,7 @@ void frame(void* userdata) {
         app.accumulator += elapsed;
         int guard = 0;
         while (app.accumulator >= kFixedStepSec && guard < 8) {
-            app.car.update(float(kFixedStepSec), input, app.track);
+            app.car.update(float(kFixedStepSec) * kDrivingPace, input, app.track);
             tickRace(app.race, app.car.ground.s, app.track.length, float(kFixedStepSec), app.track.closed);
             app.accumulator -= kFixedStepSec;
             ++guard;
@@ -603,8 +610,8 @@ void frame(void* userdata) {
                                               app.car.drifting, app.paused, float(elapsed));
     app.sound.update(soundState);
     // 前進中（または停止中）にブレーキを踏んでいる間だけランプを点灯する。
-    // 後退中のブレーキ入力は「バックの加速」なので点けない。
-    app.braking = input.brake > 0.05f && app.car.speed > -0.5f;
+    // 後退中の通常ブレーキは後退加速。サイドブレーキは速度に関係なく点灯。
+    app.braking = brakeLightsActive(input, app.car.speed);
     updateCamera(app, float(elapsed));
 
     // ドリフト中は後輪の接地点からタイヤ煙を出す。物理ステップとは独立に
@@ -633,7 +640,7 @@ void frame(void* userdata) {
 
     float aspect = float(drawableW) / float(drawableH > 0 ? drawableH : 1);
     // スピード感：速いほど視野角を少し広げて、景色の流れを強調する。
-    float fovDeg = 60.0f + 9.0f * clampf(app.car.groundSpeed() / 88.0f, 0.0f, 1.0f);
+    float fovDeg = 62.0f + 12.0f * clampf(app.car.groundSpeed() / (150.0f / 3.6f), 0.0f, 1.0f);
     Mat4 proj = perspective(fovDeg * 3.14159265f / 180.0f, aspect, 0.15f, 4000.0f);
     Mat4 view = lookAt(app.camera.eye, app.camera.look, {0, 1, 0});
     Mat4 viewProj = mul(proj, view);

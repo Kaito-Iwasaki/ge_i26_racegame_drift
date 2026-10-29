@@ -10,12 +10,18 @@ struct DriveInput {
     bool handbrake = false;  // サイドブレーキ。後輪のグリップを落として滑らせる
 };
 
+inline bool brakeLightsActive(const DriveInput& input, float forwardSpeed) {
+    return input.handbrake || (input.brake > 0.05f && forwardSpeed > -0.5f);
+}
+
 struct Car {
     float x = 0;
     float y = 0;
     float z = 0;
     float yaw = 0;
     float speed = 0;        // m/s。前方成分。正が前進（velForward と常に一致）
+    float steerHold = 0;    // Strong steering hold duration for gradual slide initiation
+    float steerInput = 0;   // Smoothed steering command, -1..1
     float steerAngle = 0;   // 前輪の切れ角（ラジアン、右が正）
     float wheelSpin = 0;
     float brakeHold = 0;    // 止まってから後退に入るまでの待ち時間
@@ -35,14 +41,7 @@ struct Car {
     float driftTime = 0;      // 現在継続中のドリフト時間 (s)
     float driftScore = 0;     // 累計スコア。速く・大きく滑るほど増える
     float gripLat = 9.0f;     // 現在の横グリップ係数 (1/s)。目標値へ滑らかに変化する
-    float powerSlideHold = 0; // パワースライド条件が続いた時間（誤発防止）
-    float steerSlideHold = 0; // ステアだけで滑らせる条件が続いた時間（誤発防止）
-    float driftRecovery = 0;  // ドリフトからグリップへ戻る進み具合 0..1（カウンターで速く溜まる）
-    float driftCounterAge = 10.0f;  // 最後にカウンターを当ててからの時間（立て直しの新鮮さ）
-    float slipEntryHold = 0;  // スリップ角が突入しきい値を超え続けている時間（瞬間の跳ねでは入らない）
-    float postureHold = 0;  // 無ステア＋アクセル時の姿勢ホールドの強さ 0..1（滑らかに出入りする）
-    float settledHold = 0;  // 滑り・ヨーとも小さい状態が続いている時間（明らかにグリップしている判定）
-    float gripRestore = 0;  // ドリフト終了直後の物理量クロスフェード 1→0（約1.4秒で通常へ戻す）
+    float driftAmount = 0;  // Continuous physical slip blend, 0..1
 
     void reset(const Track& track);
     void update(float dt, const DriveInput& input, const Track& track);

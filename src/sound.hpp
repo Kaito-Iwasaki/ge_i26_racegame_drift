@@ -349,7 +349,7 @@ struct SoundDsp {
             if (!bgmSample.empty()) {
                 const float cBgm = smoothCoeff(2.5f, sampleRate);
                 if (target.bgm > 0.0f || bgmVoice.gainSm > 0.002f) {
-                    bgm = bgmVoice.next(bgmSample, target.bgm * 0.55f, 1.0, cBgm);
+                    bgm = bgmVoice.next(bgmSample, target.bgm * 0.42f, 1.0, cBgm);
                 }
             }
 
