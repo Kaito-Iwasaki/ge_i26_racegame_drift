@@ -479,6 +479,34 @@ int main() {
         }
     }
 
+    // ---- 13. 車体のロール：ハンドルに応じて外側へ傾く --------------------------------
+    {
+        Track track = makeStraight(4000.0f);
+        Car car;
+        car.reset(track);
+        // 停車中に切っても傾かない
+        DriveInput parked;
+        parked.steer = 1.0f;
+        run(car, track, parked, 0.5f);
+        check(std::fabs(car.bodyRoll) < 0.01f, "body roll: no roll when parked", car.bodyRoll);
+        // 右へ切って走ると左（外側）へ傾く＝ bodyRoll > 0
+        accelerateTo(car, track, 25.0f);
+        DriveInput right;
+        right.steer = 0.8f;
+        right.throttle = 0.6f;
+        run(car, track, right, 0.8f);
+        check(car.bodyRoll > 0.02f, "body roll: leans out on right steer", car.bodyRoll);
+        float rightRoll = car.bodyRoll;
+        // 左へ切ると反対へ傾く
+        DriveInput left;
+        left.steer = -0.8f;
+        left.throttle = 0.6f;
+        run(car, track, left, 1.2f);
+        check(car.bodyRoll < -0.02f, "body roll: leans out on left steer", car.bodyRoll);
+        check(std::fabs(car.bodyRoll) <= 0.131f, "body roll: stays within cap", car.bodyRoll);
+        (void)rightRoll;
+    }
+
     std::printf(failures == 0 ? "\nALL PASS\n" : "\n%d FAILURES\n", failures);
     return failures == 0 ? 0 : 1;
 }

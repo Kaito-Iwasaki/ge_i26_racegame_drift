@@ -44,6 +44,7 @@ struct Car {
     float slideEntryTime = 0; // Seconds since a meaningful slide began
     float brakeDriftMix = 0; // Preserves brake-initiated behavior after release
     float driftAmount = 0;  // Continuous physical slip blend, 0..1
+    float bodyRoll = 0;     // 車体の視覚ロール (rad)。ハンドル＋横Gで外側へ傾く。正＝車体上部が左へ
 
     void reset(const Track& track);
     void update(float dt, const DriveInput& input, const Track& track);
@@ -61,3 +62,6 @@ void buildCarBrakeLights(CpuMesh& mesh);
 void buildCarWheel(CpuMesh& mesh);
 void buildCarShadow(CpuMesh& mesh);
 Mat4 carModelMatrix(const Car& car, float pitch, float roll);
+// 車体ローカル座標の点を、carModelMatrix と同じ姿勢で世界座標へ変換する
+// （ブレーキランプ位置の取得などに使う）。
+Vec3 carPointWorld(const Car& car, float pitch, float roll, Vec3 local);

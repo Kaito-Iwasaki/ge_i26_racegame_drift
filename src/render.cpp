@@ -108,6 +108,29 @@ void main() {
 }
 )GLSL";
 
+const char* kGlowVs = R"GLSL(
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aColor;
+layout(location = 2) in float aAlpha;
+uniform mat4 uViewProj;
+out vec3 vColor;
+out float vAlpha;
+void main() {
+    vColor = aColor;
+    vAlpha = aAlpha;
+    gl_Position = uViewProj * vec4(aPos, 1.0);
+}
+)GLSL";
+
+const char* kGlowFs = R"GLSL(
+in vec3 vColor;
+in float vAlpha;
+out vec4 fragColor;
+void main() {
+    fragColor = vec4(vColor, vAlpha);
+}
+)GLSL";
+
 const char* kHudVs = R"GLSL(
 layout(location = 0) in vec2 aPos;
 layout(location = 1) in vec4 aColor;
@@ -212,7 +235,8 @@ bool Renderer::init() {
     skyProgram = linkProgram(kSkyVs, kSkyFs);
     hudProgram = linkProgram(kHudVs, kHudFs);
     smokeProgram = linkProgram(kSmokeVs, kSmokeFs);
-    if (!worldProgram || !skyProgram || !hudProgram || !smokeProgram) {
+    glowProgram = linkProgram(kGlowVs, kGlowFs);
+    if (!worldProgram || !skyProgram || !hudProgram || !smokeProgram || !glowProgram) {
         return false;
     }
     uViewProj = glGetUniformLocation(worldProgram, "uViewProj");
@@ -220,6 +244,7 @@ bool Renderer::init() {
     uCamPos = glGetUniformLocation(worldProgram, "uCamPos");
     uOrtho = glGetUniformLocation(hudProgram, "uOrtho");
     uSmokeViewProj = glGetUniformLocation(smokeProgram, "uViewProj");
+    uGlowViewProj = glGetUniformLocation(glowProgram, "uViewProj");
 
     glGenVertexArrays(1, &hudVao);
     glGenBuffers(1, &hudVbo);
@@ -244,6 +269,19 @@ bool Renderer::init() {
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), reinterpret_cast<void*>(3 * sizeof(float)));
     glEnableVertexAttribArray(2);
     glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 6 * sizeof(float), reinterpret_cast<void*>(5 * sizeof(float)));
+
+    glGenVertexArrays(1, &glowVao);
+    glGenBuffers(1, &glowVbo);
+    glGenBuffers(1, &glowIbo);
+    glBindVertexArray(glowVao);
+    glBindBuffer(GL_ARRAY_BUFFER, glowVbo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, glowIbo);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 7 * sizeof(float), reinterpret_cast<void*>(0));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 7 * sizeof(float), reinterpret_cast<void*>(3 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 7 * sizeof(float), reinterpret_cast<void*>(6 * sizeof(float)));
     glBindVertexArray(dummyVao);
 
     glEnable(GL_DEPTH_TEST);
@@ -309,6 +347,31 @@ void Renderer::drawSmoke(const float* verts, int vertCount, const unsigned* indi
     glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertCount) * 6 * sizeof(float), verts,
                  GL_DYNAMIC_DRAW);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, smokeIbo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(indexCount) * sizeof(unsigned),
+                 indices, GL_DYNAMIC_DRAW);
+    glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, nullptr);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+    glBindVertexArray(dummyVao);
+}
+
+void Renderer::drawGlow(const float* verts, int vertCount, const unsigned* indices,
+                        int indexCount, const Mat4& viewProj) {
+    if (indexCount <= 0 || vertCount <= 0 || !glowProgram) {
+        return;
+    }
+    // 加算合成で光の筋に見せる。深度は読むだけ（書き込まない）。
+    // 不透明物と煙の後に呼ぶこと。
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glDepthMask(GL_FALSE);
+    glUseProgram(glowProgram);
+    glUniformMatrix4fv(uGlowViewProj, 1, GL_FALSE, viewProj.m);
+    glBindVertexArray(glowVao);
+    glBindBuffer(GL_ARRAY_BUFFER, glowVbo);
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertCount) * 7 * sizeof(float), verts,
+                 GL_DYNAMIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, glowIbo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(indexCount) * sizeof(unsigned),
                  indices, GL_DYNAMIC_DRAW);
     glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, nullptr);

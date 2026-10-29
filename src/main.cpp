@@ -1,5 +1,6 @@
 #include "car.hpp"
 #include "render.hpp"
+#include "lighttrail.hpp"
 #include "smoke.hpp"
 #include "sound.hpp"
 #include "track.hpp"
@@ -81,6 +82,9 @@ struct App {
     SmokeSystem smoke;
     std::vector<float> smokeVerts;
     std::vector<unsigned> smokeIndices;
+    LightTrail brakeTrail;
+    std::vector<float> trailVerts;
+    std::vector<unsigned> trailIndices;
     bool running = true;
     bool paused = false;
     bool showHelp = true;
@@ -291,6 +295,7 @@ void resetRace(App& app) {
     app.race = Race{};
     app.camera.ready = false;
     app.smoke.clear();
+    app.brakeTrail.clear();
 }
 
 void tickRace(Race& race, float s, float length, float dt, bool closed = true) {
@@ -614,6 +619,21 @@ void frame(void* userdata) {
     app.braking = brakeLightsActive(input, app.car.speed);
     updateCamera(app, float(elapsed));
 
+    // 車体の姿勢（ピッチ＝路面の前後傾斜、ロール＝路面のバンク＋ハンドル
+    // による車体の傾き）。描画とブレーキランプ軌跡の両方で使う。
+    float pitch = carPitch(app);
+    float roll = std::atan(app.car.ground.cross) + app.car.bodyRoll;
+
+    // ブレーキランプ点灯中は、左右ランプの位置を履歴に残して光の軌跡にする。
+    if (!app.paused) {
+        if (app.braking && app.car.groundSpeed() > 2.5f) {
+            Vec3 lampL = carPointWorld(app.car, pitch, roll, {-0.535f, 0.70f, -2.0f});
+            Vec3 lampR = carPointWorld(app.car, pitch, roll, {0.535f, 0.70f, -2.0f});
+            app.brakeTrail.record(lampL, lampR);
+        }
+        app.brakeTrail.update(float(elapsed));
+    }
+
     // ドリフト中は後輪の接地点からタイヤ煙を出す。物理ステップとは独立に
     // フレーム単位で進める（ポーズ中は凍結）。
     if (!app.paused) {
@@ -651,8 +671,6 @@ void frame(void* userdata) {
     Mat4 shadow = mul(translation(app.car.x, app.car.y + 0.08f, app.car.z), rotationY(app.car.yaw));
     app.renderer.draw(app.shadow, shadow);
 
-    float pitch = carPitch(app);
-    float roll = std::atan(app.car.ground.cross);
     Mat4 model = carModelMatrix(app.car, pitch, roll);
     app.renderer.draw(app.body, model);
     if (app.braking) {
@@ -678,6 +696,14 @@ void frame(void* userdata) {
                                static_cast<int>(app.smokeVerts.size() / 6),
                                app.smokeIndices.data(), static_cast<int>(app.smokeIndices.size()),
                                viewProj);
+    }
+    // ブレーキランプの光の軌跡は加算グローで煙の後に重ねる。
+    {
+        app.brakeTrail.buildQuads(app.trailVerts, app.trailIndices);
+        app.renderer.drawGlow(app.trailVerts.data(),
+                              static_cast<int>(app.trailVerts.size() / 7),
+                              app.trailIndices.data(), static_cast<int>(app.trailIndices.size()),
+                              viewProj);
     }
     drawHud(app);
     SDL_GL_SwapWindow(app.window);

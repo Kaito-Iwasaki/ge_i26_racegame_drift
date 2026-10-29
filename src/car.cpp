@@ -58,6 +58,7 @@ void Car::reset(const Track& track) {
     velForward = 0;
     velLateral = 0;
     yawRate = 0;
+    bodyRoll = 0;
     slipAngle = 0;
     drifting = false;
     driftTime = 0;
@@ -121,6 +122,16 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
     yawRate += clampf(nextYawRate - yawRate, -5.5f * dt, 5.5f * dt);
     yaw = wrapPi(yaw + yawRate * dt);
 
+    // --- 車体の視覚ロール ---------------------------------------------------
+    // ハンドルを切ると車体が旋回外側へ傾く。入力への即応（steerInput 項）と
+    // 実際の横G（yawRate × 前進速度）の合算で、速度が乗るほど深く傾く。
+    // 符号: 右旋回で bodyRoll>0 ＝上部が左（外側）へ。
+    {
+        float speedFac = clampf(std::fabs(vF) / 15.0f, 0.0f, 1.0f);
+        float latG = yawRate * vF;
+        float rollTarget = clampf(steerInput * 0.05f * speedFac + latG * 0.013f, -0.13f, 0.13f);
+        bodyRoll = approachExp(bodyRoll, rollTarget, 8.0f, dt);
+    }
     const float nfx = std::sin(yaw), nfz = std::cos(yaw);
     float forward = velX * nfx + velZ * nfz;
     float lateral = velX * nfz - velZ * nfx;
@@ -389,15 +400,30 @@ void buildCarShadow(CpuMesh& mesh) {
     mesh.addQuad({-1.02f, 0, -2.28f}, {1.02f, 0, -2.28f}, {1.02f, 0, 2.24f}, {-1.02f, 0, 2.24f}, {0, 1, 0}, ink);
 }
 
-Mat4 carModelMatrix(const Car& car, float pitch, float roll) {
-    Vec3 forward = normalize(Vec3{
+namespace {
+
+void carBasis(const Car& car, float pitch, float roll, Vec3& right, Vec3& up, Vec3& forward) {
+    forward = normalize(Vec3{
         std::sin(car.yaw) * std::cos(pitch),
         std::sin(pitch),
         std::cos(car.yaw) * std::cos(pitch),
     });
     Vec3 right0{std::cos(car.yaw), 0, -std::sin(car.yaw)};
     Vec3 up0 = normalize(cross(forward, right0));
-    Vec3 right = normalize(right0 * std::cos(roll) + up0 * std::sin(roll));
-    Vec3 up = normalize(cross(forward, right));
+    right = normalize(right0 * std::cos(roll) + up0 * std::sin(roll));
+    up = normalize(cross(forward, right));
+}
+
+}  // namespace
+
+Mat4 carModelMatrix(const Car& car, float pitch, float roll) {
+    Vec3 right, up, forward;
+    carBasis(car, pitch, roll, right, up, forward);
     return basis({car.x, car.y, car.z}, right, up, forward);
+}
+
+Vec3 carPointWorld(const Car& car, float pitch, float roll, Vec3 local) {
+    Vec3 right, up, forward;
+    carBasis(car, pitch, roll, right, up, forward);
+    return Vec3{car.x, car.y, car.z} + right * local.x + up * local.y + forward * local.z;
 }
