@@ -4,6 +4,7 @@
 #include "lighttrail.hpp"
 #include "smoke.hpp"
 #include "effects.hpp"
+#include "skidmarks.hpp"
 #include "rumble.hpp"
 #include "sound.hpp"
 #include "track.hpp"
@@ -110,6 +111,9 @@ struct App {
     Orbit camera;
     SmokeSystem smoke;
     SurfaceEffects surfaceEffects;
+    SkidMarks skidMarks;
+    std::vector<float> skidVerts;
+    std::vector<unsigned> skidIndices;
     RumbleState rumble;
     std::vector<float> surfaceVerts;
     std::vector<unsigned> surfaceIndices;
@@ -344,9 +348,40 @@ void resetRace(App& app) {
     app.race = Race{};
     app.smoke.clear();
     app.surfaceEffects.clear();
+    app.skidMarks.clear();
     sendRumble(app.pad, RumbleCommand{0, 0, false, true});
     app.rumble.clear();
     app.brakeTrail.clear();
+}
+
+// Project each rear tyre onto the nearest road surface, including camber.
+void recordBrakeMarks(App& app, const DriveInput& input) {
+    const bool active = brakeLightsActive(input, app.car.speed) && app.car.groundSpeed() > 2.0f &&
+                        app.car.ground.found;
+    if (!active) {
+        for (int i=0;i<2;++i) app.skidMarks.sample(i, false, {}, 0);
+        return;
+    }
+    const Vec3 fwd{std::sin(app.car.yaw),0,std::cos(app.car.yaw)};
+    const Vec3 right{fwd.z,0,-fwd.x};
+    const float strength = input.handbrake ? 1.0f : clampf(input.brake,0.0f,1.0f);
+    for (int wheel=0; wheel<2; ++wheel) {
+        const float side=wheel==0 ? -1.0f : 1.0f;
+        const Vec3 center=Vec3{app.car.x,app.car.y,app.car.z}-fwd*1.38f+right*(side*0.82f);
+        const TrackPose p=app.track.query(center.x,center.z,app.car.y,app.car.ground.s);
+        const float across = right.x*p.rightX+right.z*p.rightZ;
+        const float half=.14f;
+        if (!p.found || std::fabs(p.lateral)+std::fabs(across)*half > app.track.halfWidth+0.15f) {
+            app.skidMarks.sample(wheel,false,{},0);
+            continue;
+        }
+        const float y=p.centerY+p.lateral*p.cross+0.035f;
+        const Vec3 width=right*half;
+        SkidMarks::Edge edge{center-width,center+width};
+        edge.left.y=y-p.cross*across*half;
+        edge.right.y=y+p.cross*across*half;
+        app.skidMarks.sample(wheel,true,edge,strength);
+    }
 }
 
 void tickRace(Race& race, float s, float length, float dt, bool closed = true) {
@@ -626,6 +661,7 @@ void frame(void* userdata) {
         int guard = 0;
         while (app.accumulator >= kFixedStepSec && guard < 8) {
             app.car.update(float(kFixedStepSec) * kDrivingPace, input, app.track);
+            recordBrakeMarks(app, input);
             // Emit on every physics step so brief collisions are not lost between frames.
             const float effectDt = float(kFixedStepSec);
             Vec3 carVel{app.car.velX, 0, app.car.velZ};
@@ -704,6 +740,7 @@ void frame(void* userdata) {
         }
         app.smoke.update(float(elapsed));
         app.surfaceEffects.update(float(elapsed));
+        app.skidMarks.update(float(elapsed));
     }
 
     int drawableW = 0;
@@ -723,6 +760,11 @@ void frame(void* userdata) {
 
     Mat4 identity;
     app.renderer.draw(app.course, identity);
+    // Marks lie just above the road and use ordinary translucent blending.
+    app.skidMarks.build(app.camera.eye, app.skidVerts, app.skidIndices);
+    app.renderer.drawGlow(app.skidVerts.data(), int(app.skidVerts.size()/7),
+                          app.skidIndices.data(), int(app.skidIndices.size()), viewProj, false);
+    app.renderer.beginWorld(viewProj, app.camera.eye);
     Mat4 shadow = mul(translation(app.car.x, app.car.y + 0.08f, app.car.z), rotationY(app.car.yaw));
     app.renderer.draw(app.shadow, shadow);
 
