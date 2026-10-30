@@ -1,5 +1,6 @@
 #include "car.hpp"
 #include "camera.hpp"
+#include "wheel_pose.hpp"
 #include "suspension_visual.hpp"
 #include "countdown.hpp"
 #include "render.hpp"
@@ -757,12 +758,12 @@ void frame(void* userdata) {
             if (app.car.wallContact) {
                 if (app.car.wallNewContact) {
                     const float direction = RumbleState::wallDirection(app.car.yaw,
-                        app.car.ground.rightX, app.car.ground.rightZ, app.car.wallSide);
+                        app.car.wallRightX, app.car.wallRightZ, app.car.wallSide);
                     app.rumble.collision(app.car.wallImpact, direction);
                 }
-                Vec3 inward{-app.car.ground.rightX * app.car.wallSide, 0,
-                            -app.car.ground.rightZ * app.car.wallSide};
-                Vec3 point{app.car.x, app.car.y + 0.55f, app.car.z};
+                Vec3 inward{-app.car.wallRightX * app.car.wallSide, 0,
+                            -app.car.wallRightZ * app.car.wallSide};
+                Vec3 point{app.car.wallContactX, app.car.y + 0.55f, app.car.wallContactZ};
                 app.surfaceEffects.emitSparks(point, carVel, inward, app.car.wallImpact,
                                               app.car.wallAlongSpeed, effectDt, app.car.wallNewContact);
             }
@@ -780,8 +781,8 @@ void frame(void* userdata) {
         }
     }
     const float wallVibrationDirection = app.car.wallContact
-        ? RumbleState::wallDirection(app.car.yaw, app.car.ground.rightX,
-                                     app.car.ground.rightZ, app.car.wallSide) : 0.0f;
+        ? RumbleState::wallDirection(app.car.yaw, app.car.wallRightX,
+                                     app.car.wallRightZ, app.car.wallSide) : 0.0f;
     const RumbleCommand vibration = app.rumble.update(float(elapsed), app.paused || app.titleScreen || !app.running,
         app.car.ground.found, app.car.onAsphalt, app.car.drifting, app.car.slipAngle,
         app.car.groundSpeed(), app.car.wallContact, wallVibrationDirection);
@@ -866,24 +867,13 @@ void frame(void* userdata) {
     if (app.braking) {
         app.renderer.draw(app.brakeLights, model);
     }
-    const float wheelX = 0.82f;
-    const float wheelZ[2] = {1.42f, -1.38f};
-    // Show the driver steering clearly even when the physics limits steering at speed.
-    const float steerForWheel[2] = {app.car.steerInput * 0.50f, 0};
-    for (int i = 0; i < 2; ++i) {
-        for (int side = -1; side <= 1; side += 2) {
-            // Wheel hubs follow their own contact heights while the body rides on springs.
-            const int wheel = i*2 + (side > 0 ? 1 : 0);
-            const float localX = float(side) * wheelX;
-            const Vec3 origin = carPointWorld(app.car, pitch, roll, {0,0,0});
-            const Vec3 right = carPointWorld(app.car, pitch, roll, {1,0,0}) - origin;
-            const Vec3 up = carPointWorld(app.car, pitch, roll, {0,1,0}) - origin;
-            const Vec3 forward = carPointWorld(app.car, pitch, roll, {0,0,1}) - origin;
-            const float wheelHeight = clampf((wheelRoad[wheel] + 0.34f - origin.y - right.y*localX
-                                              - forward.y*wheelZ[i]) / std::max(0.2f, up.y), 0.12f, 0.58f);
-            Mat4 place = mul(translation(float(side) * wheelX, wheelHeight, wheelZ[i]),
-                             mul(rotationY(steerForWheel[i]), rotationX(app.car.wheelSpin)));
-            app.renderer.draw(app.wheel, mul(model, place));
+    // The wheels track the road separately from the sprung body.
+    for (int axle = 0; axle < 2; ++axle) {
+        for (int side = 0; side < 2; ++side) {
+            const float steering = axle == 0 ? app.car.steerInput * 0.50f : 0.0f;
+            Mat4 wheel = roadWheelMatrix(app.car.x, app.car.z, app.car.yaw, wheelRoad,
+                                         axle, side, steering, app.car.wheelSpin);
+            app.renderer.draw(app.wheel, wheel);
         }
     }
     // タイヤ煙は半透明なので、不透明な車体の後にビルボードで重ねる。

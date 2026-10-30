@@ -56,6 +56,7 @@ void Car::reset(const Track& track) {
     wallContact = false;
     wallNewContact = false;
     wallImpact = wallAlongSpeed = wallSide = 0;
+    wallContactX = wallContactZ = 0; wallRightX = 1; wallRightZ = 0;
     velX = 0;
     velZ = 0;
     velForward = 0;
@@ -296,39 +297,60 @@ void Car::update(float dt, const DriveInput& input, const Track& track) {
         return;
     }
 
-    const float wall = track.wallLateral();
-    const float sign = ground.lateral >= 0 ? 1.0f : -1.0f;
-    const float outward = (velX * ground.rightX + velZ * ground.rightZ) * sign;
-    const bool crossedWall = std::fabs(ground.lateral) > wall;
-    // Keep contact while moving tangentially, but release promptly when steering away.
-    const bool brushing = std::fabs(ground.lateral) >= wall - 0.05f &&
-                          (outward > 0.01f || (wasWallContact && outward > -0.2f));
-    if (crossedWall || brushing) {
-        wallContact = true;
-        wallNewContact = !wasWallContact;
-        wallSide = sign;
-        wallImpact = std::max(0.0f, outward);
-        const float overflow = std::max(0.0f, std::fabs(ground.lateral) - wall);
-        x -= ground.rightX * sign * overflow;
-        z -= ground.rightZ * sign * overflow;
-        if (outward > 0) {
-            velX -= ground.rightX * sign * outward * 0.9f;
-            velZ -= ground.rightZ * sign * outward * 0.9f;
-        }
-        // Friction acts on motion along the rail, not on the entire speed vector.
-        const float nx = ground.rightX * sign, nz = ground.rightZ * sign;
-        const float normalSpeed = velX * nx + velZ * nz;
-        const float tx = velX - nx * normalSpeed, tz = velZ - nz * normalSpeed;
-        wallAlongSpeed = std::sqrt(tx * tx + tz * tz);
-        const float keep = std::exp(-0.45f * dt);
-        velX = nx * normalSpeed + tx * keep;
-        velZ = nz * normalSpeed + tz * keep;
+    // The barrier meets the whole oriented vehicle, not only its centre.
+    // Only query the four corners near a rail; this keeps ordinary driving cheap.
+    const float wall = track.wallLateral() - (track.touge ? 0.05f : 0.0f);
+    if (std::fabs(ground.lateral) >= wall - 3.2f) {
         const float fx = std::sin(yaw), fz = std::cos(yaw);
         const float rx = std::cos(yaw), rz = -std::sin(yaw);
-        velForward = velX * fx + velZ * fz;
-        velLateral = velX * rx + velZ * rz;
-        speed = velForward;
-        ground.lateral = sign * std::min(std::fabs(ground.lateral), wall);
+        for (int iteration = 0; iteration < 4; ++iteration) {
+            float worst = -1.0e30f, hitX = x, hitZ = z, hitSide = 0;
+            TrackPose hit;
+            for (float localX : {-0.95f, 0.95f}) for (float localZ : {-2.20f, 2.20f}) {
+                const float px = x + rx*localX + fx*localZ;
+                const float pz = z + rz*localX + fz*localZ;
+                TrackPose corner = track.query(px, pz, y, ground.s);
+                if (!corner.found) continue;
+                const float side = corner.lateral >= 0 ? 1.0f : -1.0f;
+                const float penetration = std::fabs(corner.lateral) - wall;
+                if (penetration > worst) {
+                    worst = penetration; hit = corner; hitSide = side; hitX = px; hitZ = pz;
+                }
+            }
+            if (!hit.found) break;
+            const float nx = hit.rightX * hitSide, nz = hit.rightZ * hitSide;
+            const float outward = velX * nx + velZ * nz;
+            const bool touching = worst > 0 || (worst >= -0.05f &&
+                                  (outward > 0.01f || (wasWallContact && outward > -0.2f)));
+            if (!touching) break;
+            if (!wallContact) {
+                wallContact = true;
+                wallNewContact = !wasWallContact;
+                wallImpact = std::max(0.0f, outward);
+                wallSide = hitSide; wallRightX = hit.rightX; wallRightZ = hit.rightZ;
+                wallContactX = hitX - nx * worst;
+                wallContactZ = hitZ - nz * worst;
+                const float normalSpeed = velX * nx + velZ * nz;
+                const float tx = velX - nx * normalSpeed, tz = velZ - nz * normalSpeed;
+                wallAlongSpeed = std::sqrt(tx * tx + tz * tz);
+                const float keep = std::exp(-0.45f * dt);
+                const float keptNormal = normalSpeed > 0 ? normalSpeed * 0.1f : normalSpeed;
+                velX = nx * keptNormal + tx * keep;
+                velZ = nz * keptNormal + tz * keep;
+            }
+            if (worst <= 0.0f) break;
+            // A tiny inward clearance prevents repeated corrections from rounding.
+            x -= nx * (worst + 0.002f);
+            z -= nz * (worst + 0.002f);
+        }
+        if (wallContact) {
+            ground = track.query(x, z, y, preferS);
+            const float fx = std::sin(yaw), fz = std::cos(yaw);
+            const float rx = std::cos(yaw), rz = -std::sin(yaw);
+            velForward = velX * fx + velZ * fz;
+            velLateral = velX * rx + velZ * rz;
+            speed = velForward;
+        }
     }
 
     float bankLimit = track.halfWidth + track.curbWidth;

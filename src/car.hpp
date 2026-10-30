@@ -30,6 +30,8 @@ struct Car {
     bool wallNewContact = false; // First step of a contact, for the initial spark burst.
     float wallImpact = 0;      // Inward impact speed (m/s).
     float wallAlongSpeed = 0;  // Tangential speed before wall friction (m/s).
+    float wallContactX = 0, wallContactZ = 0; // Contact point on the rail.
+    float wallRightX = 1, wallRightZ = 0; // Road normal at the contact.
     float wallSide = 0;        // -1 left, +1 right relative to the track.
 
     TrackPose ground;
