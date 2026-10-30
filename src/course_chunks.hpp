@@ -6,6 +6,7 @@
 #include <limits>
 #include <map>
 #include <utility>
+#include <tuple>
 #include <vector>
 
 struct CourseChunk {
@@ -19,7 +20,7 @@ struct ChunkedCourse {
 // Group triangles spatially, but use their complete bounds so no triangle is clipped at a cell edge.
 inline ChunkedCourse chunkCourse(const CpuMesh& mesh) {
     struct Bucket { CourseChunk bounds; std::vector<std::uint32_t> indices; };
-    std::map<std::pair<int,int>, Bucket> buckets;
+    std::map<std::tuple<int,int,int>, Bucket> buckets;
     const float inf = std::numeric_limits<float>::infinity();
     for (size_t i = 0; i + 2 < mesh.indices.size(); i += 3) {
         Vec3 p[3];
@@ -28,7 +29,13 @@ inline ChunkedCourse chunkCourse(const CpuMesh& mesh) {
             p[j] = {mesh.vertices[k],mesh.vertices[k+1],mesh.vertices[k+2]};
         }
         const float x=(p[0].x+p[1].x+p[2].x)/3.0f, z=(p[0].z+p[1].z+p[2].z)/3.0f;
-        auto& b=buckets[{int(std::floor(x/128.0f)),int(std::floor(z/128.0f))}];
+        const float minX=std::min({p[0].x,p[1].x,p[2].x}), maxX=std::max({p[0].x,p[1].x,p[2].x});
+        const float minZ=std::min({p[0].z,p[1].z,p[2].z}), maxZ=std::max({p[0].z,p[1].z,p[2].z});
+        // A giant ground triangle must not expand the bounds of a regular tile.
+        const bool large=(maxX-minX>256.0f || maxZ-minZ>256.0f);
+        const auto key=large?std::make_tuple(1,int(i/3),0):
+                             std::make_tuple(0,int(std::floor(x/128.0f)),int(std::floor(z/128.0f)));
+        auto& b=buckets[key];
         if (b.indices.empty()) { b.bounds.min={inf,inf,inf}; b.bounds.max={-inf,-inf,-inf}; }
         for (int j=0;j<3;++j) {
             b.indices.push_back(mesh.indices[i+j]);
@@ -53,4 +60,12 @@ inline bool courseChunkVisible(const CourseChunk& c, const Mat4& m) {
         if (a*x+b*y+d*z+e < 0.0f) return false;
     }
     return true;
+}
+
+// At 1100 m the world is already fully covered by the existing distance fog.
+inline bool courseChunkWithinDistance(const CourseChunk& c, Vec3 eye, float distance) {
+    const float dx=std::max({c.min.x-eye.x,0.0f,eye.x-c.max.x});
+    const float dy=std::max({c.min.y-eye.y,0.0f,eye.y-c.max.y});
+    const float dz=std::max({c.min.z-eye.z,0.0f,eye.z-c.max.z});
+    return dx*dx+dy*dy+dz*dz<=distance*distance;
 }

@@ -57,6 +57,7 @@ struct Renderer {
     unsigned glowVao = 0;
     unsigned glowVbo = 0;
     unsigned glowIbo = 0;
+    Vec3 worldCamera{};
     int uViewProj = -1;
     int uModel = -1;
     int uCamPos = -1;

@@ -57,8 +57,10 @@ float beam(vec3 position, vec3 lamp, vec3 direction) {
     vec3 offset = position - lamp;
     vec3 horizontal = normalize(vec3(direction.x, 0.0, direction.z));
     float along = dot(offset.xz, horizontal.xz);
+    if (along <= 0.2 || along >= 95.0) return 0.0;
     float across = abs(offset.x * horizontal.z - offset.z * horizontal.x);
     float width = 2.2 + max(along, 0.0) * 0.62;
+    if (across >= width) return 0.0;
     float cone = 1.0 - smoothstep(width * 0.70, width, across);
     float range = smoothstep(0.2, 2.5, along) * (1.0 - smoothstep(40.0, 95.0, along));
     float expectedY = lamp.y + along * (direction.y - 0.025);
@@ -397,6 +399,7 @@ void Renderer::beginWorld(const Mat4& viewProj, Vec3 cameraPos, bool night, Vec3
     glEnable(GL_DEPTH_TEST);
     glUseProgram(worldProgram);
     glUniformMatrix4fv(uViewProj, 1, GL_FALSE, viewProj.m);
+    worldCamera = cameraPos;
     glUniform3f(uCamPos, cameraPos.x, cameraPos.y, cameraPos.z);
     glUniform1f(uNight, night ? 1.0f : 0.0f);
     glUniform3f(uLampLeft, lampLeft.x, lampLeft.y, lampLeft.z);
@@ -437,7 +440,8 @@ void Renderer::drawCourse(const GpuMesh& mesh, const Mat4& viewProj) {
     Mat4 identity;
     glUniformMatrix4fv(uModel, 1, GL_FALSE, identity.m);
     for (const CourseChunk& chunk : mesh.chunks) {
-        if (!courseChunkVisible(chunk, viewProj)) continue;
+        if (!courseChunkWithinDistance(chunk, worldCamera, 1100.0f) ||
+            !courseChunkVisible(chunk, viewProj)) continue;
         glDrawElements(GL_TRIANGLES, chunk.count, GL_UNSIGNED_INT,
                        reinterpret_cast<const void*>(size_t(chunk.first) * sizeof(std::uint32_t)));
     }
