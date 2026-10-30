@@ -2,6 +2,7 @@
 
 #include "geom.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
@@ -35,14 +36,18 @@ struct SmokeSystem {
     }
 
     // 後輪の接地点（左右）から煙を出す。strength は 0..1（滑りの深さ・速さ）。
-    void emit(Vec3 left, Vec3 right, Vec3 carVel, float strength, float dt) {
+    void emit(Vec3 left, Vec3 right, Vec3 carVel, float strength, float dt,
+              float rateScale = 1.0f, int particleLimit = kMaxParticles) {
         if (strength <= 0.01f || dt <= 0.0f) {
             return;
         }
-        spawnAcc += dt * (30.0f + 90.0f * strength);
+        rateScale=clampf(rateScale,0.0f,1.0f);
+        particleLimit=std::max(0,std::min(kMaxParticles,particleLimit));
+        spawnAcc += dt * (30.0f + 90.0f * strength) * rateScale;
         while (spawnAcc >= 1.0f) {
             spawnAcc -= 1.0f;
-            if (static_cast<int>(particles.size()) >= kMaxParticles) {
+            if (static_cast<int>(particles.size()) >= particleLimit) {
+                spawnAcc=std::min(spawnAcc,1.0f);
                 break;
             }
             Particle p;

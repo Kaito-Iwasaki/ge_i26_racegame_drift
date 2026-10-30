@@ -412,6 +412,7 @@ void resetRace(App& app) {
     app.rivalSmoke.clear();
     app.rivalSuspension.reset();
     app.rivalSkids.clear();
+    app.rivalSkids.minSpacing=1.0f;
     app.rivalTrail.clear();
     app.battleResult=0;
     app.rivalContact=false;
@@ -451,6 +452,11 @@ void recordTyreMarks(App& app, const Car& car, SkidMarks& marks, bool braking, f
     for (int wheel=0; wheel<2; ++wheel) {
         const float side=wheel==0 ? -1.0f : 1.0f;
         const Vec3 center=Vec3{car.x,car.y,car.z}-fwd*1.38f+right*(side*0.82f);
+        if (marks.minSpacing > SkidMarks::kMinSpacing && marks.connected[wheel]) {
+            const Vec3 previous=(marks.previous[wheel].left+marks.previous[wheel].right)*0.5f;
+            const float dx=center.x-previous.x,dz=center.z-previous.z;
+            if(dx*dx+dz*dz<marks.minSpacing*marks.minSpacing) continue;
+        }
         const TrackPose p=app.track.query(center.x,center.z,car.y,car.ground.s);
         const float across = right.x*p.rightX+right.z*p.rightZ;
         const float half=.14f;
@@ -1069,7 +1075,7 @@ void frame(void* userdata) {
             Vec3 f{std::sin(r.yaw),0,std::cos(r.yaw)}, right{f.z,0,-f.x};
             Vec3 base{r.x,r.y+0.12f,r.z}; base=base-f*1.38f;
             app.rivalSmoke.emit(base-right*.82f,base+right*.82f,{r.velX,0,r.velZ},
-                                clampf(std::fabs(r.slipAngle)*1.6f,0,1),float(elapsed));
+                                clampf(std::fabs(r.slipAngle)*1.6f,0,1),float(elapsed),0.60f,180);
         }
         app.rivalSmoke.update(float(elapsed));
         app.surfaceEffects.update(float(elapsed));
@@ -1176,14 +1182,14 @@ void frame(void* userdata) {
         const Vec3 mirrorEye=carPointWorld(app.car,pitch,roll,{0,1.35f,-2.38f});
         const Vec3 rearPoint=carPointWorld(app.car,pitch,roll,{0,1.35f,-22.38f});
         const Vec3 mirrorUp=normalize(carPointWorld(app.car,pitch,roll,{0,2.35f,-2.38f})-mirrorEye);
-        Mat4 mirrorProj=perspective(68.0f*3.14159265f/180.0f,float(mw)/float(mh),.15f,4000.0f);
+        Mat4 mirrorProj=perspective(68.0f*3.14159265f/180.0f,float(mw)/float(mh),.15f,700.0f);
         mirrorProj.m[0]*=-1.0f;
         const Mat4 mirrorVP=mul(mirrorProj,lookAt(mirrorEye,rearPoint,mirrorUp));
         app.renderer.beginMirror(mx,my,mw,mh);
         app.renderer.drawSky(app.night);
-        app.renderer.beginWorld(mirrorVP,mirrorEye,app.night,lampLeft,lampRight,lampDirection,rearLight,app.braking,reversing);
+        app.renderer.beginWorld(mirrorVP,mirrorEye,app.night,lampLeft,lampRight,lampDirection,rearLight,app.braking,reversing,true);
         setRivalLighting(app);
-        app.renderer.drawCourse(app.course,mirrorVP);
+        app.renderer.drawCourse(app.course,mirrorVP,500.0f);
         drawRival(app);
         drawFlares(app,mirrorEye,rearPoint,mirrorUp,mirrorVP,pitch,roll);
         app.renderer.endMirror();

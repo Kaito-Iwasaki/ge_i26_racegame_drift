@@ -47,6 +47,7 @@ in vec3 vColor;
 in vec3 vWorld;
 uniform vec3 uCamPos;
 uniform float uNight;
+uniform float uMirror;
 uniform vec3 uLampLeft, uLampRight, uLampDir, uRearLight;
 uniform vec3 uRivalLeft, uRivalRight, uRivalDir, uRivalRear;
 uniform float uRivalOn, uRivalBrake;
@@ -103,6 +104,7 @@ void main() {
     float fog = clamp((dist - 60.0) / 900.0, 0.0, 1.0);
     vec3 haze = mix(vec3(0.62, 0.74, 0.84), vec3(0.025, 0.035, 0.07), uNight);
     if (uNight > 0.5) fog = clamp((dist - 120.0) / 650.0, 0.0, 1.0);
+    if (uMirror > 0.5) fog = clamp((dist - 140.0) / 220.0, 0.0, 1.0);
     if (uEmissive > 0.5) fog = 0.0;
     fragColor = vec4(mix(color, haze, fog), 1.0);
 }
@@ -293,6 +295,7 @@ bool Renderer::init() {
     uViewProj = glGetUniformLocation(worldProgram, "uViewProj");
     uModel = glGetUniformLocation(worldProgram, "uModel");
     uCamPos = glGetUniformLocation(worldProgram, "uCamPos");
+    uMirror = glGetUniformLocation(worldProgram, "uMirror");
     uNight = glGetUniformLocation(worldProgram, "uNight");
     uLampLeft = glGetUniformLocation(worldProgram, "uLampLeft");
     uLampRight = glGetUniformLocation(worldProgram, "uLampRight");
@@ -394,7 +397,7 @@ void Renderer::drawSky(bool night) {
     glEnable(GL_DEPTH_TEST);
 }
 
-void Renderer::beginWorld(const Mat4& viewProj, Vec3 cameraPos, bool night, Vec3 lampLeft, Vec3 lampRight, Vec3 lampDirection, Vec3 rearLight, bool braking, bool reversing) {
+void Renderer::beginWorld(const Mat4& viewProj, Vec3 cameraPos, bool night, Vec3 lampLeft, Vec3 lampRight, Vec3 lampDirection, Vec3 rearLight, bool braking, bool reversing, bool mirror) {
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
     glUseProgram(worldProgram);
@@ -402,6 +405,7 @@ void Renderer::beginWorld(const Mat4& viewProj, Vec3 cameraPos, bool night, Vec3
     worldCamera = cameraPos;
     glUniform3f(uCamPos, cameraPos.x, cameraPos.y, cameraPos.z);
     glUniform1f(uNight, night ? 1.0f : 0.0f);
+    glUniform1f(uMirror, mirror ? 1.0f : 0.0f);
     glUniform3f(uLampLeft, lampLeft.x, lampLeft.y, lampLeft.z);
     glUniform3f(uLampRight, lampRight.x, lampRight.y, lampRight.z);
     glUniform3f(uLampDir, lampDirection.x, lampDirection.y, lampDirection.z);
@@ -410,9 +414,12 @@ void Renderer::beginWorld(const Mat4& viewProj, Vec3 cameraPos, bool night, Vec3
     glUniform1f(uReverseOn, reversing ? 1.0f : 0.0f);
     glUniform1f(uEmissive, 0.0f);
     glUniform1f(uRivalOn, 0.0f);
+    rivalLightingActive=false;
 }
 
 void Renderer::setRivalLighting(bool enabled, bool braking, Vec3 left, Vec3 right, Vec3 direction, Vec3 rear) {
+    rivalLightingActive=enabled;
+    rivalLightingCenter=(left+right)*0.5f;
     glUniform1f(uRivalOn,enabled?1.0f:0.0f);
     glUniform1f(uRivalBrake,braking?1.0f:0.0f);
     glUniform3f(uRivalLeft,left.x,left.y,left.z); glUniform3f(uRivalRight,right.x,right.y,right.z);
@@ -434,17 +441,23 @@ void Renderer::drawEmissive(const GpuMesh& mesh, const Mat4& model) {
     glUniform1f(uEmissive, 0.0f);
 }
 
-void Renderer::drawCourse(const GpuMesh& mesh, const Mat4& viewProj) {
+void Renderer::drawCourse(const GpuMesh& mesh, const Mat4& viewProj, float maxDistance) {
     if (mesh.indexCount <= 0) return;
     glBindVertexArray(mesh.vao);
     Mat4 identity;
     glUniformMatrix4fv(uModel, 1, GL_FALSE, identity.m);
+    bool lit=rivalLightingActive;
     for (const CourseChunk& chunk : mesh.chunks) {
-        if (!courseChunkWithinDistance(chunk, worldCamera, 1100.0f) ||
+        if (!courseChunkWithinDistance(chunk, worldCamera, maxDistance) ||
             !courseChunkVisible(chunk, viewProj)) continue;
+        // Both headlights and the brake glow have finite reach. The extra margin
+        // includes the full beam cone and height even on steep roads.
+        const bool needsRival=rivalLightingActive && courseChunkWithinDistance(chunk,rivalLightingCenter,170.0f);
+        if (needsRival!=lit) { glUniform1f(uRivalOn,needsRival?1.0f:0.0f); lit=needsRival; }
         glDrawElements(GL_TRIANGLES, chunk.count, GL_UNSIGNED_INT,
                        reinterpret_cast<const void*>(size_t(chunk.first) * sizeof(std::uint32_t)));
     }
+    if(lit!=rivalLightingActive) glUniform1f(uRivalOn,rivalLightingActive?1.0f:0.0f);
 }
 
 void Renderer::drawSmoke(const float* verts, int vertCount, const unsigned* indices,

@@ -24,11 +24,11 @@ struct Renderer {
     void drawSky(bool night);
     void beginMirror(int x, int y, int w, int h);
     void endMirror();
-    void beginWorld(const Mat4& viewProj, Vec3 cameraPos, bool night, Vec3 lampLeft, Vec3 lampRight, Vec3 lampDirection, Vec3 rearLight, bool braking, bool reversing);
+    void beginWorld(const Mat4& viewProj, Vec3 cameraPos, bool night, Vec3 lampLeft, Vec3 lampRight, Vec3 lampDirection, Vec3 rearLight, bool braking, bool reversing, bool mirror = false);
     void drawEmissive(const GpuMesh& mesh, const Mat4& model);
     void setRivalLighting(bool enabled, bool braking, Vec3 left, Vec3 right, Vec3 direction, Vec3 rear);
     void draw(const GpuMesh& mesh, const Mat4& model);
-    void drawCourse(const GpuMesh& mesh, const Mat4& viewProj);
+    void drawCourse(const GpuMesh& mesh, const Mat4& viewProj, float maxDistance = 1100.0f);
     // タイヤ煙などの半透明ビルボード用。頂点は [xyz, uv, alpha] の 6 float。
     void drawSmoke(const float* verts, int vertCount, const unsigned* indices, int indexCount,
                    const Mat4& viewProj);
@@ -58,6 +58,9 @@ struct Renderer {
     unsigned glowVbo = 0;
     unsigned glowIbo = 0;
     Vec3 worldCamera{};
+    bool rivalLightingActive=false;
+    Vec3 rivalLightingCenter{};
+    int uMirror = -1;
     int uViewProj = -1;
     int uModel = -1;
     int uCamPos = -1;

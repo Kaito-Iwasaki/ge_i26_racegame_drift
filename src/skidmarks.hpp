@@ -10,6 +10,7 @@ struct SkidMarks {
     struct Edge { Vec3 left, right; };
     struct Segment { Edge a,b; double born; float opacity; };
     double elapsed=0.0;
+    float minSpacing=kMinSpacing;
     std::deque<Segment> segments;
     Edge previous[2]{};
     bool connected[2]{false,false};
@@ -26,7 +27,7 @@ struct SkidMarks {
         const Vec3 a=(previous[wheel].left+previous[wheel].right)*.5f;
         const Vec3 b=(edge.left+edge.right)*.5f;
         const float distance=length(b-a);
-        if (distance<kMinSpacing) return;
+        if (distance<minSpacing) return;
         if (distance>kMaxSpacing) { previous[wheel]=edge; return; }
         segments.push_back({previous[wheel],edge,elapsed,clampf(intensity,0.0f,1.0f)});
         previous[wheel]=edge;
