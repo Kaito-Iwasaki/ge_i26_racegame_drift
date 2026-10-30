@@ -107,6 +107,7 @@ struct App {
     GpuMesh course;
     GpuMesh body;
     GpuMesh brakeLights;
+    GpuMesh headlights;
     GpuMesh wheel;
     GpuMesh shadow;
     bool braking = false;  // 今フレームのブレーキ入力（ブレーキランプ点灯用）
@@ -129,6 +130,7 @@ struct App {
     std::vector<unsigned> trailIndices;
     bool running = true;
     bool paused = false;
+    bool night = false;
     bool titleScreen = true;
     bool showHelp = true;
     double accumulator = 0;
@@ -219,6 +221,7 @@ struct PadPulse {
     bool pause = false;
     bool camera = false;
     bool start = false;
+    bool night = false;
 };
 
 float stickDead(float value) {
@@ -251,12 +254,14 @@ PadPulse readBrowserPad(DriveInput& input) {
     static bool prevReset = false;
     static bool prevPause = false;
     static bool prevStart = false;
+    static bool prevNight = false;
     bool camera = false;
     bool reset = false;
     bool pause = false;
     bool start = false;
+    bool night = false;
     if (emscripten_sample_gamepad_data() != EMSCRIPTEN_RESULT_SUCCESS) {
-        prevCamera = prevReset = prevPause = prevStart = false;
+        prevCamera = prevReset = prevPause = prevStart = prevNight = false;
         return pulse;
     }
     const int count = emscripten_get_num_gamepads();
@@ -292,6 +297,7 @@ PadPulse readBrowserPad(DriveInput& input) {
             reset = reset || held(8);
             pause = pause || held(9);
             start = start || held(0);
+            night = night || held(1);
             // A(0) または RB(5) がサイドブレーキ
             input.handbrake = input.handbrake || held(0) || held(5);
         } else if (pad.numAxes >= 6) {
@@ -299,6 +305,8 @@ PadPulse readBrowserPad(DriveInput& input) {
             input.brake = std::max(input.brake, triggerLevel(axis(4)));
         }
     }
+    pulse.night = night && !prevNight;
+    prevNight = night;
     pulse.start = start && !prevStart;
     prevStart = start;
     pulse.camera = camera && !prevCamera;
@@ -343,6 +351,7 @@ DriveInput readDrive(SDL_GameController* pad, PadPulse& pulse) {
     // SDL はブラウザのパッドをゲームコントローラと認識しないことが多い。
     // 標準マッピングを Gamepad API から直接読む。
     PadPulse browser = readBrowserPad(input);
+    pulse.night = pulse.night || browser.night;
     pulse.start = pulse.start || browser.start;
     pulse.camera = pulse.camera || browser.camera;
     pulse.reset = pulse.reset || browser.reset;
@@ -569,10 +578,11 @@ void drawTitle(App& app) {
     text(430, 247, 1.8f, "STICK     STEER", 0.9f, 0.92f, 0.95f);
     text(430, 274, 1.8f, "A / RB    HANDBRAKE", 0.9f, 0.92f, 0.95f);
     text(430, 301, 1.8f, "Y         CAMERA", 0.9f, 0.92f, 0.95f);
-    text(44, 355, 1.8f, "C CAMERA   R RESET   P PAUSE   H HELP", 0.7f, 0.77f, 0.82f);
-    text(44, 382, 1.8f, "PAD: Y CAMERA   BACK RESET   START PAUSE", 0.7f, 0.77f, 0.82f);
+    text(44, 355, 1.8f, "C CAMERA   R RESET   P PAUSE   H HELP   N DAY/NIGHT", 0.7f, 0.77f, 0.82f);
+    text(44, 382, 1.8f, "PAD: Y CAMERA   B DAY/NIGHT   BACK RESET   START PAUSE", 0.7f, 0.77f, 0.82f);
     hud.addQuad(left + 44*scale, top + 436*scale, left + 766*scale, top + 498*scale,
                 0.95f, 0.48f, 0.12f, 1);
+    text(44, 412, 1.6f, app.night ? "N / B: NIGHT MODE" : "N / B: DAY MODE", 0.95f, 0.70f, 0.3f);
     text(102, 455, 2.5f, "PRESS ENTER / A / START TO BEGIN", 0.04f, 0.05f, 0.06f);
     hud.flushHud();
 }
@@ -635,10 +645,10 @@ void drawHud(App& app) {
 
     if (app.showHelp) {
         hud.drawText(24, float(hud.height) - 78, 1.7f,
-                     "W/UP ACCEL  S/DOWN BRAKE  A/D STEER  SPACE DRIFT  R RESET  C CAMERA  P PAUSE",
+                     "W/UP ACCEL  S/DOWN BRAKE  A/D STEER  SPACE DRIFT  N DAY/NIGHT",
                      0.9f, 0.92f, 0.94f, 1);
         hud.drawText(24, float(hud.height) - 54, 1.7f,
-                     "PAD: RT ACCEL  LT BRAKE  STICK STEER  A DRIFT  Y CAMERA  BACK RESET  START PAUSE",
+                     "C CAMERA  R RESET  P PAUSE  PAD: RT/LT ACCEL/BRAKE  A DRIFT  B DAY/NIGHT",
                      0.75f, 0.8f, 0.84f, 1);
     }
     hud.drawText(float(hud.width) - 250, float(hud.height) - 28, 1.6f, "(C) OSM / GSI", 0.85f, 0.88f, 0.9f, 1);
@@ -691,6 +701,7 @@ void frame(void* userdata) {
         } else if (event.type == SDL_KEYDOWN && !event.key.repeat) {
             SDL_Scancode code = event.key.keysym.scancode;
             if (code == SDL_SCANCODE_ESCAPE) app.running = false;
+            else if (code == SDL_SCANCODE_N) app.night = !app.night;
             else if (app.titleScreen) { if (code == SDL_SCANCODE_RETURN || code == SDL_SCANCODE_KP_ENTER) start = true; }
             else if (code == SDL_SCANCODE_R) reset = true;
             else if (code == SDL_SCANCODE_C) app.camera.mode = (app.camera.mode + 1) % kCameraModeCount;
@@ -703,6 +714,10 @@ void frame(void* userdata) {
             SDL_GameControllerClose(app.pad);
             app.pad = nullptr;
         } else if (event.type == SDL_CONTROLLERBUTTONDOWN) {
+#ifndef __EMSCRIPTEN__
+            if (event.cbutton.button == SDL_CONTROLLER_BUTTON_B) app.night = !app.night;
+            else
+#endif
             if (app.titleScreen) {
                 if (event.cbutton.button == SDL_CONTROLLER_BUTTON_A || event.cbutton.button == SDL_CONTROLLER_BUTTON_START) start = true;
             } else if (event.cbutton.button == SDL_CONTROLLER_BUTTON_BACK) reset = true;
@@ -712,6 +727,7 @@ void frame(void* userdata) {
     }
     PadPulse padPulse;
     DriveInput input = readDrive(app.pad, padPulse);
+    if (padPulse.night) app.night = !app.night;
     if (app.titleScreen) {
         start = start || padPulse.start || padPulse.pause;
     } else {
@@ -843,7 +859,7 @@ void frame(void* userdata) {
     SDL_GL_GetDrawableSize(app.window, &drawableW, &drawableH);
     app.renderer.resize(drawableW, drawableH);
     app.renderer.clearFrame();
-    app.renderer.drawSky();
+    app.renderer.drawSky(app.night);
 
     float aspect = float(drawableW) / float(drawableH > 0 ? drawableH : 1);
     // スピード感：速いほど視野角を少し広げて、景色の流れを強調する。
@@ -851,22 +867,26 @@ void frame(void* userdata) {
     Mat4 proj = perspective(fovDeg * 3.14159265f / 180.0f, aspect, 0.15f, 4000.0f);
     Mat4 view = lookAt(app.camera.eye, app.camera.look, app.camera.up);
     Mat4 viewProj = mul(proj, view);
-    app.renderer.beginWorld(viewProj, app.camera.eye);
+    const Vec3 lampLeft = carPointWorld(app.car, pitch, roll, {-0.52f, 0.60f, 2.18f});
+    const Vec3 lampRight = carPointWorld(app.car, pitch, roll, {0.52f, 0.60f, 2.18f});
+    const Vec3 lampDirection = normalize(carPointWorld(app.car, pitch, roll, {0,0,1}) - carPointWorld(app.car, pitch, roll, {0,0,0}));
+    app.renderer.beginWorld(viewProj, app.camera.eye, app.night, lampLeft, lampRight, lampDirection);
 
     app.renderer.drawCourse(app.course, viewProj);
     // Marks lie just above the road and use ordinary translucent blending.
     app.skidMarks.build(app.camera.eye, app.skidVerts, app.skidIndices);
     app.renderer.drawGlow(app.skidVerts.data(), int(app.skidVerts.size()/7),
                           app.skidIndices.data(), int(app.skidIndices.size()), viewProj, false);
-    app.renderer.beginWorld(viewProj, app.camera.eye);
+    app.renderer.beginWorld(viewProj, app.camera.eye, app.night, lampLeft, lampRight, lampDirection);
     Mat4 shadow = mul(translation(app.car.x, app.car.y + 0.08f, app.car.z), rotationY(app.car.yaw));
     app.renderer.draw(app.shadow, shadow);
 
     Mat4 model = carModelMatrix(app.car, pitch, roll);
     app.renderer.draw(app.body, model);
     if (app.braking) {
-        app.renderer.draw(app.brakeLights, model);
+        app.renderer.drawEmissive(app.brakeLights, model);
     }
+    if (app.night) app.renderer.drawEmissive(app.headlights, model);
     // The wheels track the road separately from the sprung body.
     for (int axle = 0; axle < 2; ++axle) {
         for (int side = 0; side < 2; ++side) {
@@ -1073,14 +1093,17 @@ int main(int argc, char** argv) {
     app.track.visual = CpuMesh{}; // GPU owns the uploaded course geometry.
     CpuMesh body;
     CpuMesh brakeLights;
+    CpuMesh headlights;
     CpuMesh wheel;
     CpuMesh shadow;
     buildCarBody(body);
     buildCarBrakeLights(brakeLights);
+    buildCarHeadlights(headlights);
     buildCarWheel(wheel);
     buildCarShadow(shadow);
     app.body = app.renderer.upload(body);
     app.brakeLights = app.renderer.upload(brakeLights);
+    app.headlights = app.renderer.upload(headlights);
     app.wheel = app.renderer.upload(wheel);
     app.shadow = app.renderer.upload(shadow);
     app.car.reset(app.track);

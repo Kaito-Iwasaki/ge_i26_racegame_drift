@@ -424,6 +424,16 @@ void buildCarBrakeLights(CpuMesh& mesh) {
     mesh.addBox({-0.775f, 0.625f, -2.045f}, {-0.295f, 0.775f, -1.955f}, lit);
 }
 
+void buildCarHeadlights(CpuMesh& mesh) {
+    const Vec3 glow{1.0f, 0.95f, 0.72f};
+    // Bright lenses sit on the front face of the two retractable headlamps.
+    for (float side : {-1.0f, 1.0f}) {
+        float x0 = side > 0 ? 0.28f : -0.76f;
+        float x1 = side > 0 ? 0.76f : -0.28f;
+        mesh.addBox({x0, 0.47f, 2.165f}, {x1, 0.64f, 2.185f}, glow);
+    }
+}
+
 void buildCarWheel(CpuMesh& mesh) {
     const int seg = 14;
     const float radius = 0.34f;

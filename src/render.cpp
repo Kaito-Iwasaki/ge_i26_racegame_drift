@@ -46,16 +46,39 @@ in vec3 vNormal;
 in vec3 vColor;
 in vec3 vWorld;
 uniform vec3 uCamPos;
+uniform float uNight;
+uniform vec3 uLampLeft, uLampRight, uLampDir;
+uniform float uEmissive;
 out vec4 fragColor;
+float beam(vec3 position, vec3 lamp) {
+    vec3 offset = position - lamp;
+    vec3 horizontal = normalize(vec3(uLampDir.x, 0.0, uLampDir.z));
+    float along = dot(offset.xz, horizontal.xz);
+    float across = abs(offset.x * horizontal.z - offset.z * horizontal.x);
+    float width = 0.9 + max(along, 0.0) * 0.20;
+    float cone = 1.0 - smoothstep(width * 0.55, width, across);
+    float range = smoothstep(0.2, 2.5, along) * (1.0 - smoothstep(40.0, 95.0, along));
+    float expectedY = lamp.y + along * (uLampDir.y - 0.025);
+    float height = 1.0 - smoothstep(2.0, 7.0 + max(along, 0.0) * 0.10, abs(position.y - expectedY));
+    return cone * range * height;
+}
 void main() {
     vec3 n = normalize(vNormal);
     if (!gl_FrontFacing) n = -n;
     vec3 sun = normalize(vec3(0.35, 0.86, 0.28));
     float light = 0.36 + 0.64 * max(dot(n, sun), 0.0);
     vec3 color = vColor * light;
+    if (uNight > 0.5) {
+        float lamps = max(beam(vWorld, uLampLeft), beam(vWorld, uLampRight));
+        vec3 moon = vec3(0.12, 0.16, 0.24);
+        color = vColor * (moon + vec3(1.45, 1.32, 1.05) * lamps);
+    }
+    if (uEmissive > 0.5) color = vColor;
     float dist = distance(vWorld, uCamPos);
     float fog = clamp((dist - 60.0) / 900.0, 0.0, 1.0);
-    vec3 haze = vec3(0.62, 0.74, 0.84);
+    vec3 haze = mix(vec3(0.62, 0.74, 0.84), vec3(0.025, 0.035, 0.07), uNight);
+    if (uNight > 0.5) fog = clamp((dist - 120.0) / 650.0, 0.0, 1.0);
+    if (uEmissive > 0.5) fog = 0.0;
     fragColor = vec4(mix(color, haze, fog), 1.0);
 }
 )GLSL";
@@ -71,11 +94,14 @@ void main() {
 
 const char* kSkyFs = R"GLSL(
 in float vY;
+uniform float uNight;
 out vec4 fragColor;
 void main() {
     float t = clamp(vY * 0.5 + 0.5, 0.0, 1.0);
     vec3 horizon = vec3(0.62, 0.74, 0.84);
     vec3 zenith = vec3(0.28, 0.48, 0.78);
+    horizon = mix(horizon, vec3(0.025, 0.035, 0.07), uNight);
+    zenith = mix(zenith, vec3(0.006, 0.010, 0.035), uNight);
     fragColor = vec4(mix(horizon, zenith, smoothstep(0.0, 1.0, t)), 1.0);
 }
 )GLSL";
@@ -242,6 +268,12 @@ bool Renderer::init() {
     uViewProj = glGetUniformLocation(worldProgram, "uViewProj");
     uModel = glGetUniformLocation(worldProgram, "uModel");
     uCamPos = glGetUniformLocation(worldProgram, "uCamPos");
+    uNight = glGetUniformLocation(worldProgram, "uNight");
+    uLampLeft = glGetUniformLocation(worldProgram, "uLampLeft");
+    uLampRight = glGetUniformLocation(worldProgram, "uLampRight");
+    uLampDir = glGetUniformLocation(worldProgram, "uLampDir");
+    uEmissive = glGetUniformLocation(worldProgram, "uEmissive");
+    uSkyNight = glGetUniformLocation(skyProgram, "uNight");
     uOrtho = glGetUniformLocation(hudProgram, "uOrtho");
     uSmokeViewProj = glGetUniformLocation(smokeProgram, "uViewProj");
     uGlowViewProj = glGetUniformLocation(glowProgram, "uViewProj");
@@ -303,22 +335,28 @@ void Renderer::resize(int newWidth, int newHeight) {
     glViewport(0, 0, width, height);
 }
 
-void Renderer::drawSky() {
+void Renderer::drawSky(bool night) {
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_FALSE);
     glUseProgram(skyProgram);
+    glUniform1f(uSkyNight, night ? 1.0f : 0.0f);
     glBindVertexArray(dummyVao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glDepthMask(GL_TRUE);
     glEnable(GL_DEPTH_TEST);
 }
 
-void Renderer::beginWorld(const Mat4& viewProj, Vec3 cameraPos) {
+void Renderer::beginWorld(const Mat4& viewProj, Vec3 cameraPos, bool night, Vec3 lampLeft, Vec3 lampRight, Vec3 lampDirection) {
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
     glUseProgram(worldProgram);
     glUniformMatrix4fv(uViewProj, 1, GL_FALSE, viewProj.m);
     glUniform3f(uCamPos, cameraPos.x, cameraPos.y, cameraPos.z);
+    glUniform1f(uNight, night ? 1.0f : 0.0f);
+    glUniform3f(uLampLeft, lampLeft.x, lampLeft.y, lampLeft.z);
+    glUniform3f(uLampRight, lampRight.x, lampRight.y, lampRight.z);
+    glUniform3f(uLampDir, lampDirection.x, lampDirection.y, lampDirection.z);
+    glUniform1f(uEmissive, 0.0f);
 }
 
 void Renderer::draw(const GpuMesh& mesh, const Mat4& model) {
@@ -328,6 +366,12 @@ void Renderer::draw(const GpuMesh& mesh, const Mat4& model) {
     glBindVertexArray(mesh.vao);
     glUniformMatrix4fv(uModel, 1, GL_FALSE, model.m);
     glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, nullptr);
+}
+
+void Renderer::drawEmissive(const GpuMesh& mesh, const Mat4& model) {
+    glUniform1f(uEmissive, 1.0f);
+    draw(mesh, model);
+    glUniform1f(uEmissive, 0.0f);
 }
 
 void Renderer::drawCourse(const GpuMesh& mesh, const Mat4& viewProj) {
