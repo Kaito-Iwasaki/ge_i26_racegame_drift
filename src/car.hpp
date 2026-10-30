@@ -52,6 +52,7 @@ struct Car {
     float driftAmount = 0;  // Continuous physical slip blend, 0..1
     float suspension[4] = {};     // Visual spring displacement: front left/right, rear left/right (m).
     float suspensionVel[4] = {};  // Spring velocity (m/s).
+    float bodyHeave = 0; // Vertical body travel in metres.
     float bodyRoll = 0;     // 車体の視覚ロール (rad)。サスペンションの左右差から算出。
     float bodyRollVel = 0;  // ロールの角速度。バネ・ダンパーで重心の揺れを出す
     float bodyPitch = 0;    // 車体の視覚ピッチ (rad)。加減速の荷重移動。正＝加速でノーズが上がる

@@ -1,5 +1,6 @@
 #include "car.hpp"
 #include "camera.hpp"
+#include "suspension_visual.hpp"
 #include "countdown.hpp"
 #include "render.hpp"
 #include "lighttrail.hpp"
@@ -110,6 +111,7 @@ struct App {
     bool braking = false;  // 今フレームのブレーキ入力（ブレーキランプ点灯用）
     Race race;
     StartCountdown countdown;
+    SuspensionVisual suspensionVisual;
     Orbit camera;
     SmokeSystem smoke;
     SurfaceEffects surfaceEffects;
@@ -357,6 +359,7 @@ void resetRace(App& app) {
     app.car.reset(app.track);
     app.race = Race{};
     app.countdown.reset();
+    app.suspensionVisual.reset();
     app.sound.resetBgm();
     app.accumulator = 0;
     app.smoke.clear();
@@ -662,15 +665,18 @@ void drawHud(App& app) {
     hud.flushHud();
 }
 
-float carPitch(const App& app) {
-    Vec3 forward{std::sin(app.car.yaw), 0, std::cos(app.car.yaw)};
-    float preferS = app.car.ground.found ? app.car.ground.s : -1.0f;
-    TrackPose ahead = app.track.query(app.car.x + forward.x * 2.4f, app.car.z + forward.z * 2.4f, app.car.y, preferS);
-    TrackPose behind = app.track.query(app.car.x - forward.x * 2.4f, app.car.z - forward.z * 2.4f, app.car.y, preferS);
-    if (!ahead.found || !behind.found) {
-        return 0;
+// Four road samples follow the vehicle yaw and use the current road layer at crossings.
+void sampleWheelRoad(const App& app, float road[4]) {
+    const float sn = std::sin(app.car.yaw), cs = std::cos(app.car.yaw);
+    const float axleZ[2] = {1.42f, -1.38f};
+    const float preferS = app.car.ground.found ? app.car.ground.s : -1.0f;
+    const float edge = app.track.halfWidth + app.track.curbWidth;
+    for (int axle=0; axle<2; ++axle) for (int side=0; side<2; ++side) {
+        const float x = (side == 0 ? -0.82f : 0.82f);
+        TrackPose p = app.track.query(app.car.x + cs*x + sn*axleZ[axle],
+                                      app.car.z - sn*x + cs*axleZ[axle], app.car.y, preferS);
+        road[axle*2+side] = p.found ? p.centerY + clampf(p.lateral,-edge,edge)*p.cross : app.car.y;
     }
-    return std::atan2(ahead.centerY - behind.centerY, 4.8f);
 }
 
 void frame(void* userdata) {
@@ -794,8 +800,12 @@ void frame(void* userdata) {
     // 後退中の通常ブレーキは後退加速。サイドブレーキは速度に関係なく点灯。
     app.braking = brakeLightsActive(input, app.car.speed);
     // The hood camera and vehicle mesh use the same pitch and roll.
-    float pitch = carPitch(app) + app.car.bodyPitch;
-    float roll = std::atan(app.car.ground.cross) + app.car.bodyRoll;
+    float wheelRoad[4];
+    sampleWheelRoad(app, wheelRoad);
+    app.suspensionVisual.update(wheelRoad, (app.paused || app.titleScreen) ? 0.0f : float(elapsed));
+    app.car.bodyHeave = app.suspensionVisual.heave(app.car.y);
+    float pitch = app.suspensionVisual.pitch() + app.car.bodyPitch;
+    float roll = app.suspensionVisual.roll() + app.car.bodyRoll;
     updateCamera(app, pitch, roll);
 
     // ブレーキランプ点灯中は、左右ランプの位置を履歴に残して光の軌跡にする。
@@ -862,9 +872,15 @@ void frame(void* userdata) {
     const float steerForWheel[2] = {app.car.steerInput * 0.50f, 0};
     for (int i = 0; i < 2; ++i) {
         for (int side = -1; side <= 1; side += 2) {
-            // The body moves on its springs; keep each wheel near the road.
-            const float wheelHeight = 0.34f - float(side) * wheelX * std::sin(app.car.bodyRoll)
-                                      - wheelZ[i] * std::sin(app.car.bodyPitch);
+            // Wheel hubs follow their own contact heights while the body rides on springs.
+            const int wheel = i*2 + (side > 0 ? 1 : 0);
+            const float localX = float(side) * wheelX;
+            const Vec3 origin = carPointWorld(app.car, pitch, roll, {0,0,0});
+            const Vec3 right = carPointWorld(app.car, pitch, roll, {1,0,0}) - origin;
+            const Vec3 up = carPointWorld(app.car, pitch, roll, {0,1,0}) - origin;
+            const Vec3 forward = carPointWorld(app.car, pitch, roll, {0,0,1}) - origin;
+            const float wheelHeight = clampf((wheelRoad[wheel] + 0.34f - origin.y - right.y*localX
+                                              - forward.y*wheelZ[i]) / std::max(0.2f, up.y), 0.12f, 0.58f);
             Mat4 place = mul(translation(float(side) * wheelX, wheelHeight, wheelZ[i]),
                              mul(rotationY(steerForWheel[i]), rotationX(app.car.wheelSpin)));
             app.renderer.draw(app.wheel, mul(model, place));

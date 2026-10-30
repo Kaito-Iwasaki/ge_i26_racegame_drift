@@ -62,6 +62,7 @@ void Car::reset(const Track& track) {
     velLateral = 0;
     yawRate = 0;
     for (int i = 0; i < 4; ++i) { suspension[i] = 0; suspensionVel[i] = 0; }
+    bodyHeave = 0;
     bodyRoll = 0;
     bodyRollVel = 0;
     bodyPitch = 0;
@@ -459,7 +460,7 @@ Vec3 cgOrigin(const Car& car, float pitch, float roll, const Vec3& up) {
     Vec3 rightBank, upBank, forwardBank;
     carBasis(car, pitch, roll - car.bodyRoll, rightBank, upBank, forwardBank);
     const float kCgHeight = 0.45f;
-    return Vec3{car.x, car.y, car.z} + (upBank - up) * kCgHeight;
+    return Vec3{car.x, car.y + car.bodyHeave, car.z} + (upBank - up) * kCgHeight;
 }
 
 }  // namespace
