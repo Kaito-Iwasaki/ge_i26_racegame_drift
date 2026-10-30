@@ -159,12 +159,17 @@ struct SampleLoop {
             return 0.0f;
         }
         double n = double(data.size());
-        double p = std::fmod(pos, n);
-        if (p < 0.0) p += n;
+        // Playback heads are normally already in range; avoid fmod for every sample.
+        double p = pos;
+        if (p < 0.0 || p >= n) {
+            p = std::fmod(p, n);
+            if (p < 0.0) p += n;
+        }
         std::size_t i0 = std::size_t(p);
         float frac = float(p - double(i0));
         float a = data[i0];
-        float b = data[(i0 + 1) % data.size()];
+        const std::size_t i1 = i0 + 1 == data.size() ? 0 : i0 + 1;
+        float b = data[i1];
         return a + (b - a) * frac;
     }
 };
@@ -243,7 +248,11 @@ struct SoundDsp {
         const float cTireOff = smoothCoeff(9.0f, sampleRate);   // 止まり際は少し残す
         const float cSquealOn = smoothCoeff(40.0f, sampleRate);  // 鳴き始めは「キッ」と速く
         const float cSquealOff = smoothCoeff(14.0f, sampleRate);
+        const float cBgm = smoothCoeff(2.5f, sampleRate);
         const float cSample = smoothCoeff(22.0f, sampleRate);  // サンプル再生のゲイン追従
+        // Tire pitch is constant for this callback; calculate the filter once.
+        const float svfF = driftSample.empty() ? 2.0f * std::sin(3.14159265f *
+            (700.0f + 950.0f * target.tirePitch01) / sampleRate) : 0.0f;
 
         for (int i = 0; i < n; ++i) {
             runSm += ((target.running ? 1.0f : 0.0f) - runSm) * cRun;
@@ -320,8 +329,6 @@ struct SoundDsp {
                 tire = driftVoice.next(driftSample, amount * 0.80f, rate, cGain);
             } else {
             // 合成版タイヤ音（帯域ノイズ）
-            float tireHz = 700.0f + 950.0f * target.tirePitch01;
-            float svfF = 2.0f * std::sin(3.14159265f * tireHz / sampleRate);
             float noise = nextNoise();
             svfLow += svfF * svfBand;
             float high = noise - svfLow - 0.9f * svfBand;  // 減衰係数で Q を決める
@@ -349,7 +356,6 @@ struct SoundDsp {
             // （ポーズを解いたときに曲が先に進んでいる事故を防ぐ）。
             float bgm = 0.0f;
             if (!bgmSample.empty()) {
-                const float cBgm = smoothCoeff(2.5f, sampleRate);
                 if (target.bgm > 0.0f || bgmVoice.gainSm > 0.002f) {
                     bgm = bgmVoice.next(bgmSample, target.bgm * 0.42f, 1.0, cBgm);
                 }

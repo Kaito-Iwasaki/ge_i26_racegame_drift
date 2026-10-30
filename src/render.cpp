@@ -69,6 +69,11 @@ float beam(vec3 position, vec3 lamp, vec3 direction) {
     return cone * range * height;
 }
 void main() {
+    float dist = distance(vWorld, uCamPos);
+    vec3 haze = mix(vec3(0.62, 0.74, 0.84), vec3(0.025, 0.035, 0.07), uNight);
+    float fogEnd = uMirror > 0.5 ? 360.0 : (uNight > 0.5 ? 770.0 : 960.0);
+    // Fully fogged geometry contributes exactly the haze colour.
+    if (uEmissive < 0.5 && dist >= fogEnd) { fragColor=vec4(haze,1.0); return; }
     vec3 n = normalize(vNormal);
     if (!gl_FrontFacing) n = -n;
     vec3 sun = normalize(vec3(0.35, 0.86, 0.28));
@@ -100,9 +105,7 @@ void main() {
         color += vColor*reach*vertical*mix(0.30,1.0,uNight)*vec3(1.6,0.035,0.02);
     }
     if (uEmissive > 0.5) color = vColor;
-    float dist = distance(vWorld, uCamPos);
     float fog = clamp((dist - 60.0) / 900.0, 0.0, 1.0);
-    vec3 haze = mix(vec3(0.62, 0.74, 0.84), vec3(0.025, 0.035, 0.07), uNight);
     if (uNight > 0.5) fog = clamp((dist - 120.0) / 650.0, 0.0, 1.0);
     if (uMirror > 0.5) fog = clamp((dist - 140.0) / 220.0, 0.0, 1.0);
     if (uEmissive > 0.5) fog = 0.0;
