@@ -1,5 +1,6 @@
 #include "car.hpp"
 #include "camera.hpp"
+#include "menu.hpp"
 #include "wheel_pose.hpp"
 #include "suspension_visual.hpp"
 #include "countdown.hpp"
@@ -134,6 +135,9 @@ struct App {
     bool night = false;
     bool titleScreen = true;
     bool showHelp = true;
+    int menuSelection = 2;
+    bool menuPadUp = false, menuPadDown = false, menuPadLeft = false, menuPadRight = false;
+    bool menuPadConfirm = false;
     double accumulator = 0;
     Uint64 prevCounter = 0;
     float fps = 0;  // 表示用 FPS（フレーム間隔の指数移動平均）
@@ -223,6 +227,7 @@ struct PadPulse {
     bool camera = false;
     bool start = false;
     bool night = false;
+    bool menuUp = false, menuDown = false, menuLeft = false, menuRight = false;
 };
 
 float stickDead(float value) {
@@ -261,6 +266,7 @@ PadPulse readBrowserPad(DriveInput& input) {
     bool pause = false;
     bool start = false;
     bool night = false;
+    bool up=false, down=false, left=false, right=false;
     if (emscripten_sample_gamepad_data() != EMSCRIPTEN_RESULT_SUCCESS) {
         prevCamera = prevReset = prevPause = prevStart = prevNight = false;
         return pulse;
@@ -281,6 +287,10 @@ PadPulse readBrowserPad(DriveInput& input) {
             return index < pad.numButtons && pad.digitalButton[index];
         };
         const bool standard = std::strcmp(pad.mapping, "standard") == 0 || (pad.numButtons >= 16 && pad.numAxes >= 2);
+        up = up || axis(1) < -0.55f || held(12);
+        down = down || axis(1) > 0.55f || held(13);
+        left = left || axis(0) < -0.55f || held(14);
+        right = right || axis(0) > 0.55f || held(15);
         input.steer += stickDead(axis(0));
         if (standard) {
             input.steer += stickDead(axis(2));
@@ -306,6 +316,7 @@ PadPulse readBrowserPad(DriveInput& input) {
             input.brake = std::max(input.brake, triggerLevel(axis(4)));
         }
     }
+    pulse.menuUp=up; pulse.menuDown=down; pulse.menuLeft=left; pulse.menuRight=right;
     pulse.night = night && !prevNight;
     prevNight = night;
     pulse.start = start && !prevStart;
@@ -352,6 +363,8 @@ DriveInput readDrive(SDL_GameController* pad, PadPulse& pulse) {
     // SDL はブラウザのパッドをゲームコントローラと認識しないことが多い。
     // 標準マッピングを Gamepad API から直接読む。
     PadPulse browser = readBrowserPad(input);
+    pulse.menuUp=browser.menuUp; pulse.menuDown=browser.menuDown;
+    pulse.menuLeft=browser.menuLeft; pulse.menuRight=browser.menuRight;
     pulse.night = pulse.night || browser.night;
     pulse.start = pulse.start || browser.start;
     pulse.camera = pulse.camera || browser.camera;
@@ -553,38 +566,53 @@ void drawMinimap(App& app) {
     }
 }
 
+void drawMenuButton(Renderer& hud, MenuRect r, const char* label, bool selected, bool active) {
+    const float border=selected?3.0f:1.0f;
+    hud.addQuad(r.x-border,r.y-border,r.x+r.w+border,r.y+r.h+border,
+                selected?1.0f:0.25f,selected?0.65f:0.32f,selected?0.25f:0.40f,1);
+    hud.addQuad(r.x,r.y,r.x+r.w,r.y+r.h, active?0.43f:0.07f,active?0.23f:0.10f,active?0.08f:0.15f,1);
+    const float scale=std::min(r.h/18.0f, r.w/(float(std::strlen(label))*6.0f+8.0f));
+    const float width=float(std::strlen(label))*6.0f*scale;
+    hud.drawText(r.x+(r.w-width)*0.5f,r.y+(r.h-7.0f*scale)*0.5f,scale,label,1,0.95f,0.88f,1);
+}
+
 void drawTitle(App& app) {
-    Renderer& hud = app.renderer;
-    hud.beginHud();
-    const float w = float(hud.width), h = float(hud.height);
-    const float scale = std::min(w / 900.0f, h / 600.0f);
-    const float left = w * 0.5f - 405.0f * scale;
-    const float top = h * 0.5f - 270.0f * scale;
-    hud.addQuad(0, 0, w, h, 0.01f, 0.02f, 0.04f, 0.78f);
-    hud.addQuad(left, top, left + 810 * scale, top + 540 * scale, 0.025f, 0.04f, 0.06f, 0.94f);
-    hud.addQuad(left, top, left + 810 * scale, top + 5 * scale, 1.0f, 0.55f, 0.18f, 1);
-    auto text = [&](float x, float y, float size, const char* value, float r, float g, float b) {
-        hud.drawText(left + x * scale, top + y * scale, size * scale, value, r, g, b, 1);
-    };
-    text(44, 35, 5.5f, "RACE GAME DRIFT", 1, 0.95f, 0.85f);
-    text(44, 95, 2.2f, "GET READY FOR THE DOWNHILL", 0.95f, 0.59f, 0.25f);
-    text(44, 150, 2.8f, "HOW TO PLAY", 1, 0.95f, 0.85f);
-    text(44, 192, 2.0f, "KEYBOARD", 0.95f, 0.59f, 0.25f);
-    text(44, 220, 1.8f, "W / UP       ACCELERATE", 0.9f, 0.92f, 0.95f);
-    text(44, 247, 1.8f, "S / DOWN     BRAKE / REVERSE", 0.9f, 0.92f, 0.95f);
-    text(44, 274, 1.8f, "A D / LEFT RIGHT  STEER", 0.9f, 0.92f, 0.95f);
-    text(44, 301, 1.8f, "SPACE        HANDBRAKE / DRIFT", 0.9f, 0.92f, 0.95f);
-    text(430, 192, 2.0f, "CONTROLLER", 0.95f, 0.59f, 0.25f);
-    text(430, 220, 1.8f, "RT / LT   ACCEL / BRAKE", 0.9f, 0.92f, 0.95f);
-    text(430, 247, 1.8f, "STICK     STEER", 0.9f, 0.92f, 0.95f);
-    text(430, 274, 1.8f, "A / RB    HANDBRAKE", 0.9f, 0.92f, 0.95f);
-    text(430, 301, 1.8f, "Y         CAMERA", 0.9f, 0.92f, 0.95f);
-    text(44, 355, 1.8f, "C CAMERA   R RESET   P PAUSE   H HELP   N DAY/NIGHT", 0.7f, 0.77f, 0.82f);
-    text(44, 382, 1.8f, "PAD: Y CAMERA   B DAY/NIGHT   BACK RESET   START PAUSE", 0.7f, 0.77f, 0.82f);
-    hud.addQuad(left + 44*scale, top + 436*scale, left + 766*scale, top + 498*scale,
-                0.95f, 0.48f, 0.12f, 1);
-    text(44, 412, 1.6f, app.night ? "N / B: NIGHT MODE" : "N / B: DAY MODE", 0.95f, 0.70f, 0.3f);
-    text(102, 455, 2.5f, "PRESS ENTER / A / START TO BEGIN", 0.04f, 0.05f, 0.06f);
+    Renderer& hud=app.renderer; hud.beginHud();
+    MenuLayout m(float(hud.width),float(hud.height));
+    const float l=m.left,t=m.top,s=m.scale;
+    hud.addQuad(0,0,float(hud.width),float(hud.height),0.01f,0.02f,0.04f,0.80f);
+    hud.addQuad(l,t,l+810*s,t+540*s,0.025f,0.04f,0.06f,0.96f);
+    hud.addQuad(l,t,l+810*s,t+5*s,1,0.55f,0.18f,1);
+    auto text=[&](float x,float y,float size,const char* label,float r,float g,float b){hud.drawText(l+x*s,t+y*s,size*s,label,r,g,b,1);};
+    text(44,35,5.0f,"RACE GAME DRIFT",1,.95f,.85f);
+    text(44,95,2.0f,"SELECT TIME OF DAY AND START",.95f,.59f,.25f);
+    text(44,145,2.4f,"CONTROLS",1,.95f,.85f);
+    text(44,185,1.8f,"KEYBOARD",.95f,.59f,.25f);
+    text(44,214,1.7f,"W / UP      ACCELERATE",.9f,.92f,.95f);
+    text(44,241,1.7f,"S / DOWN    BRAKE / REVERSE",.9f,.92f,.95f);
+    text(44,268,1.7f,"A D / ARROWS STEER",.9f,.92f,.95f);
+    text(44,295,1.7f,"SPACE       HANDBRAKE",.9f,.92f,.95f);
+    text(430,185,1.8f,"CONTROLLER",.95f,.59f,.25f);
+    text(430,214,1.7f,"RT / LT   ACCEL / BRAKE",.9f,.92f,.95f);
+    text(430,241,1.7f,"STICK     STEER",.9f,.92f,.95f);
+    text(430,268,1.7f,"A / RB    HANDBRAKE",.9f,.92f,.95f);
+    text(430,295,1.7f,"Y CAMERA  START PAUSE",.9f,.92f,.95f);
+    text(44,344,1.6f,"TIME OF DAY",.95f,.59f,.25f);
+    drawMenuButton(hud,m.title(0),"DAY",app.menuSelection==0,!app.night);
+    drawMenuButton(hud,m.title(1),"NIGHT",app.menuSelection==1,app.night);
+    drawMenuButton(hud,m.title(2),"START RACE",app.menuSelection==2,true);
+    text(44,520,1.2f,"MOUSE / ARROWS / STICK   ENTER / A: SELECT",.7f,.77f,.82f);
+    hud.flushHud();
+}
+
+void drawPauseMenu(App& app) {
+    Renderer& hud=app.renderer; hud.beginHud(); MenuLayout m(float(hud.width),float(hud.height));
+    hud.addQuad(0,0,float(hud.width),float(hud.height),0.01f,0.02f,0.04f,0.75f);
+    hud.addQuad(m.left+165*m.scale,m.top+115*m.scale,m.left+645*m.scale,m.top+465*m.scale,.025f,.04f,.06f,.96f);
+    hud.drawText(m.left+330*m.scale,m.top+145*m.scale,4*m.scale,"PAUSE",1,.95f,.85f,1);
+    const char* labels[3]={"RESUME","RESTART","TITLE"};
+    for(int i=0;i<3;i++) drawMenuButton(hud,m.pause(i),labels[i],app.menuSelection==i,false);
+    hud.drawText(m.left+235*m.scale,m.top+445*m.scale,1.2f*m.scale,"ARROWS / STICK   ENTER / A: SELECT",.7f,.77f,.82f,1);
     hud.flushHud();
 }
 
@@ -645,12 +673,11 @@ void drawHud(App& app) {
     hud.drawText(float(hud.width) - 140, 52, 2.0f, line, 0.8f, 0.84f, 0.88f, 1);
 
     if (app.showHelp) {
-        hud.drawText(24, float(hud.height) - 78, 1.7f,
-                     "W/UP ACCEL  S/DOWN BRAKE  A/D STEER  SPACE DRIFT",
-                     0.9f, 0.92f, 0.94f, 1);
-        hud.drawText(24, float(hud.height) - 54, 1.7f,
-                     "C CAMERA  R RESET  P PAUSE  PAD: RT/LT ACCEL/BRAKE  A DRIFT",
-                     0.75f, 0.8f, 0.84f, 1);
+        const float y=float(hud.height)-92;
+        hud.addQuad(12,y-8,std::min(float(hud.width)-12,620.f),y+65,.02f,.03f,.05f,.72f);
+        hud.drawText(20,y,1.5f,"KEYS  W/S: GAS/BRAKE  A/D: STEER  SPACE: DRIFT",.95f,.95f,.95f,1);
+        hud.drawText(20,y+20,1.5f,"PAD   RT/LT: GAS/BRAKE  STICK: STEER  A: DRIFT",.80f,.85f,.90f,1);
+        hud.drawText(20,y+40,1.5f,"C / Y: CAMERA    P / START: PAUSE    H: HIDE HELP",.80f,.85f,.90f,1);
     }
     hud.drawText(float(hud.width) - 250, float(hud.height) - 28, 1.6f, "(C) OSM / GSI", 0.85f, 0.88f, 0.9f, 1);
     if (!app.paused && (app.countdown.number() > 0 || app.countdown.showGo())) {
@@ -667,9 +694,7 @@ void drawHud(App& app) {
         hud.drawText(centerX-width*.5f, centerY, scale, countdownText,
                      go ? 0.35f : 1.0f, go ? 1.0f : 0.83f, go ? 0.38f : 0.25f, 1.0f);
     }
-    if (app.paused) {
-        hud.drawText(float(hud.width) * 0.5f - 70, float(hud.height) * 0.45f, 5.0f, "PAUSE", 1, 0.95f, 0.9f, 1);
-    }
+
     if (app.race.finished) {
         hud.drawText(float(hud.width) * 0.5f - 105, float(hud.height) * 0.45f, 5.0f, "FINISH", 1, 0.95f, 0.9f, 1);
     }
@@ -694,56 +719,96 @@ void sampleWheelRoad(const App& app, float road[4]) {
 void frame(void* userdata) {
     App& app = *static_cast<App*>(userdata);
     SDL_Event event;
-    bool reset = false;
-    bool start = false;
+    bool reset = false, activate = false, start = false, togglePause = false;
+    int dx = 0, dy = 0;
     while (SDL_PollEvent(&event)) {
-        if (event.type == SDL_QUIT) {
-            app.running = false;
-        } else if (event.type == SDL_KEYDOWN && !event.key.repeat) {
+        if (event.type == SDL_QUIT) app.running = false;
+        else if (event.type == SDL_KEYDOWN && !event.key.repeat) {
             SDL_Scancode code = event.key.keysym.scancode;
-            if (code == SDL_SCANCODE_ESCAPE) app.running = false;
-            else if (code == SDL_SCANCODE_N && app.titleScreen) app.night = !app.night;
-            else if (app.titleScreen) { if (code == SDL_SCANCODE_RETURN || code == SDL_SCANCODE_KP_ENTER) start = true; }
-            else if (code == SDL_SCANCODE_R) reset = true;
-            else if (code == SDL_SCANCODE_C) app.camera.mode = (app.camera.mode + 1) % kCameraModeCount;
-            else if (code == SDL_SCANCODE_P) app.paused = !app.paused;
-            else if (code == SDL_SCANCODE_H) app.showHelp = !app.showHelp;
-        } else if (event.type == SDL_CONTROLLERDEVICEADDED) {
-            openPad(app);
-        } else if (event.type == SDL_CONTROLLERDEVICEREMOVED && app.pad &&
-                   event.cdevice.which == SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(app.pad))) {
-            SDL_GameControllerClose(app.pad);
-            app.pad = nullptr;
-        } else if (event.type == SDL_CONTROLLERBUTTONDOWN) {
-#ifndef __EMSCRIPTEN__
-            if (event.cbutton.button == SDL_CONTROLLER_BUTTON_B && app.titleScreen) app.night = !app.night;
-            else
-#endif
-            if (app.titleScreen) {
-                if (event.cbutton.button == SDL_CONTROLLER_BUTTON_A || event.cbutton.button == SDL_CONTROLLER_BUTTON_START) start = true;
-            } else if (event.cbutton.button == SDL_CONTROLLER_BUTTON_BACK) reset = true;
-            else if (event.cbutton.button == SDL_CONTROLLER_BUTTON_START) app.paused = !app.paused;
-            else if (event.cbutton.button == SDL_CONTROLLER_BUTTON_Y) app.camera.mode = (app.camera.mode + 1) % kCameraModeCount;
+            if (app.titleScreen || app.paused) {
+                if (code == SDL_SCANCODE_UP || code == SDL_SCANCODE_W) dy=-1;
+                else if (code == SDL_SCANCODE_DOWN || code == SDL_SCANCODE_S) dy=1;
+                else if (code == SDL_SCANCODE_LEFT || code == SDL_SCANCODE_A) dx=-1;
+                else if (code == SDL_SCANCODE_RIGHT || code == SDL_SCANCODE_D) dx=1;
+                else if (code == SDL_SCANCODE_RETURN || code == SDL_SCANCODE_KP_ENTER) activate=true;
+                else if ((code == SDL_SCANCODE_ESCAPE || code == SDL_SCANCODE_P) && app.paused) togglePause=true;
+            } else {
+                if (code == SDL_SCANCODE_ESCAPE || code == SDL_SCANCODE_P) togglePause=true;
+                else if (code == SDL_SCANCODE_R) reset=true;
+                else if (code == SDL_SCANCODE_C) app.camera.mode=(app.camera.mode+1)%kCameraModeCount;
+                else if (code == SDL_SCANCODE_H) app.showHelp=!app.showHelp;
+            }
+        } else if ((event.type == SDL_MOUSEMOTION || event.type == SDL_MOUSEBUTTONDOWN) && (app.titleScreen || app.paused)) {
+            int windowW=0,windowH=0; SDL_GetWindowSize(app.window,&windowW,&windowH);
+            const int mouseX=event.type==SDL_MOUSEMOTION?event.motion.x:event.button.x;
+            const int mouseY=event.type==SDL_MOUSEMOTION?event.motion.y:event.button.y;
+            MenuLayout layout(float(app.renderer.width),float(app.renderer.height));
+            const float px=float(mouseX)*float(app.renderer.width)/float(std::max(1,windowW));
+            const float py=float(mouseY)*float(app.renderer.height)/float(std::max(1,windowH));
+            int hit=layout.hit(app.titleScreen,px,py);
+            if(hit>=0) {
+                app.menuSelection=hit;
+                if(event.type==SDL_MOUSEBUTTONDOWN && event.button.button==SDL_BUTTON_LEFT) activate=true;
+            }
+        } else if (event.type == SDL_CONTROLLERDEVICEADDED) openPad(app);
+        else if (event.type == SDL_CONTROLLERDEVICEREMOVED && app.pad &&
+                 event.cdevice.which == SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(app.pad))) {
+            SDL_GameControllerClose(app.pad); app.pad=nullptr;
         }
+#ifndef __EMSCRIPTEN__
+        else if (event.type == SDL_CONTROLLERBUTTONDOWN && app.titleScreen && event.cbutton.button==SDL_CONTROLLER_BUTTON_START) start=true;
+        else if (event.type == SDL_CONTROLLERBUTTONDOWN && !app.titleScreen && !app.paused) {
+            if(event.cbutton.button==SDL_CONTROLLER_BUTTON_BACK) reset=true;
+            else if(event.cbutton.button==SDL_CONTROLLER_BUTTON_START) togglePause=true;
+            else if(event.cbutton.button==SDL_CONTROLLER_BUTTON_Y) app.camera.mode=(app.camera.mode+1)%kCameraModeCount;
+        } else if (event.type == SDL_CONTROLLERBUTTONDOWN && app.paused && event.cbutton.button==SDL_CONTROLLER_BUTTON_START) togglePause=true;
+#endif
     }
     PadPulse padPulse;
     DriveInput input = readDrive(app.pad, padPulse);
-    if (padPulse.night && app.titleScreen) app.night = !app.night;
-    if (app.titleScreen) {
-        start = start || padPulse.start || padPulse.pause;
+#ifndef __EMSCRIPTEN__
+    if(app.pad) {
+        float ax=stickAxis(app.pad,SDL_CONTROLLER_AXIS_LEFTX), ay=stickAxis(app.pad,SDL_CONTROLLER_AXIS_LEFTY);
+        padPulse.menuUp=ay<-.55f || SDL_GameControllerGetButton(app.pad,SDL_CONTROLLER_BUTTON_DPAD_UP);
+        padPulse.menuDown=ay>.55f || SDL_GameControllerGetButton(app.pad,SDL_CONTROLLER_BUTTON_DPAD_DOWN);
+        padPulse.menuLeft=ax<-.55f || SDL_GameControllerGetButton(app.pad,SDL_CONTROLLER_BUTTON_DPAD_LEFT);
+        padPulse.menuRight=ax>.55f || SDL_GameControllerGetButton(app.pad,SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
+        bool confirm=SDL_GameControllerGetButton(app.pad,SDL_CONTROLLER_BUTTON_A);
+        padPulse.start=confirm && !app.menuPadConfirm; app.menuPadConfirm=confirm;
+    } else app.menuPadConfirm=false;
+#endif
+    if (app.titleScreen || app.paused) {
+        if(padPulse.menuUp && !app.menuPadUp) dy=-1;
+        if(padPulse.menuDown && !app.menuPadDown) dy=1;
+        if(padPulse.menuLeft && !app.menuPadLeft) dx=-1;
+        if(padPulse.menuRight && !app.menuPadRight) dx=1;
+        activate=activate || padPulse.start;
+        if(padPulse.pause && app.paused) togglePause=true;
+        if(padPulse.pause && app.titleScreen) start=true;
+        app.menuSelection=menuMove(app.titleScreen,app.menuSelection,dx,dy,app.night);
     } else {
-        if (padPulse.reset) reset = true;
-        if (padPulse.pause) app.paused = !app.paused;
-        if (padPulse.camera) app.camera.mode = (app.camera.mode + 1) % kCameraModeCount;
+        if(padPulse.reset) reset=true;
+        if(padPulse.pause) togglePause=true;
+        if(padPulse.camera) app.camera.mode=(app.camera.mode+1)%kCameraModeCount;
     }
-    if (start && app.titleScreen) {
-        app.titleScreen = false;
-        resetRace(app);
-        reset = true;
+    app.menuPadUp=padPulse.menuUp; app.menuPadDown=padPulse.menuDown;
+    app.menuPadLeft=padPulse.menuLeft; app.menuPadRight=padPulse.menuRight;
+    if (togglePause && !app.titleScreen) {
+        app.paused=!app.paused;
+        if(app.paused) app.menuSelection=0;
+        activate=false;
     }
-    if (reset) {
-        resetRace(app);
+    if (activate && app.titleScreen) {
+        if(app.menuSelection==0) app.night=false;
+        else if(app.menuSelection==1) app.night=true;
+        else start=true;
+    } else if (activate && app.paused) {
+        if(app.menuSelection==0) app.paused=false;
+        else if(app.menuSelection==1) { app.paused=false; reset=true; }
+        else { app.paused=false; app.titleScreen=true; app.menuSelection=2; reset=true; }
     }
+    if (start && app.titleScreen) { app.titleScreen=false; reset=true; }
+    if (reset) resetRace(app);
 
     Uint64 now = SDL_GetPerformanceCounter();
     double elapsed = double(now - app.prevCounter) / double(SDL_GetPerformanceFrequency());
@@ -931,7 +996,7 @@ void frame(void* userdata) {
                               viewProj);
     }
     if (app.titleScreen) drawTitle(app);
-    else drawHud(app);
+    else { drawHud(app); if (app.paused) drawPauseMenu(app); }
     SDL_GL_SwapWindow(app.window);
 
 #ifndef __EMSCRIPTEN__

@@ -56,8 +56,8 @@ float beam(vec3 position, vec3 lamp) {
     vec3 horizontal = normalize(vec3(uLampDir.x, 0.0, uLampDir.z));
     float along = dot(offset.xz, horizontal.xz);
     float across = abs(offset.x * horizontal.z - offset.z * horizontal.x);
-    float width = 1.2 + max(along, 0.0) * 0.34;
-    float cone = 1.0 - smoothstep(width * 0.55, width, across);
+    float width = 2.5 + max(along, 0.0) * 0.75;
+    float cone = 1.0 - smoothstep(width * 0.70, width, across);
     float range = smoothstep(0.2, 2.5, along) * (1.0 - smoothstep(40.0, 95.0, along));
     float expectedY = lamp.y + along * (uLampDir.y - 0.025);
     float height = 1.0 - smoothstep(2.0, 7.0 + max(along, 0.0) * 0.10, abs(position.y - expectedY));
