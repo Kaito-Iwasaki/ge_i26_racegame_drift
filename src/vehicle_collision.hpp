@@ -8,7 +8,8 @@ struct VehicleContact {
 // Oriented rectangles in the horizontal plane, including car length and width.
 inline VehicleContact resolveVehicleContact(Car& a,Car& b) {
  VehicleContact result;
- if(std::fabs(a.y-b.y)>2.0f) return result;
+ // Cars whose bounding circles cannot meet need no oriented-box test.
+ if(std::fabs(a.y-b.y)>2.0f || std::fabs(a.x-b.x)>5.0f || std::fabs(a.z-b.z)>5.0f) return result;
  Vec3 ar{std::cos(a.yaw),0,-std::sin(a.yaw)},af{std::sin(a.yaw),0,std::cos(a.yaw)};
  Vec3 br{std::cos(b.yaw),0,-std::sin(b.yaw)},bf{std::sin(b.yaw),0,std::cos(b.yaw)};
  Vec3 delta{b.x-a.x,0,b.z-a.z};float overlap=1e9f;Vec3 normal{};

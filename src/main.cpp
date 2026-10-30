@@ -429,6 +429,12 @@ void resetRace(App& app) {
     app.brakeTrail.clear();
 }
 
+// Distant rivals continue racing, but their nearby visual effects can be skipped.
+bool rivalNear(const App& app,float radius) {
+    const float dx=app.rival.car.x-app.car.x, dz=app.rival.car.z-app.car.z;
+    return dx*dx+dz*dz<=radius*radius && std::fabs(app.rival.car.y-app.car.y)<100.0f;
+}
+
 // Project each rear tyre onto the nearest road surface, including camber.
 void recordTyreMarks(App& app, const Car& car, SkidMarks& marks, bool braking, float brakeInput) {
     const bool sliding = car.drifting && std::fabs(car.slipAngle) > 0.12f;
@@ -756,7 +762,7 @@ void sampleWheelRoad(const App& app, const Car& car, float road[4]) {
 }
 
 void drawRival(App& app) {
-    if (app.battle && !app.titleScreen) {
+    if (app.battle && !app.titleScreen && rivalNear(app,300.0f)) {
         const Car& rival=app.rival.car;
         const float rivalPitch=app.rivalPitch, rivalRoll=app.rivalRoll;
         const Mat4 rivalModel=carModelMatrix(rival,rivalPitch,rivalRoll);
@@ -777,7 +783,7 @@ void setRivalLighting(App& app) {
     const float p=app.rivalPitch, roll=app.rivalRoll;
     const Vec3 o=carPointWorld(r,p,roll,{0,0,0});
     const Vec3 f=normalize(carPointWorld(r,p,roll,{0,0,1})-o);
-    app.renderer.setRivalLighting(app.battle && !app.titleScreen,app.rival.braking,
+    app.renderer.setRivalLighting(app.battle && !app.titleScreen && rivalNear(app,300.0f),app.rival.braking,
         carPointWorld(r,p,roll,{-.52f,.60f,2.18f}),carPointWorld(r,p,roll,{.52f,.60f,2.18f}),
         f,carPointWorld(r,p,roll,{0,.70f,-2.05f}));
 }
@@ -800,7 +806,7 @@ void drawFlares(App& app,Vec3 camera,Vec3 look,Vec3 up,const Mat4& vp,float play
         }
     };
     vehicle(app.car,playerPitch,playerRoll,app.night,app.braking);
-    if(app.battle && !app.titleScreen) vehicle(app.rival.car,app.rivalPitch,app.rivalRoll,app.night,app.rival.braking);
+    if(app.battle && !app.titleScreen && rivalNear(app,300.0f)) vehicle(app.rival.car,app.rivalPitch,app.rivalRoll,app.night,app.rival.braking);
     app.renderer.drawGlow(app.flareVerts.data(),int(app.flareVerts.size()/7),app.flareIndices.data(),int(app.flareIndices.size()),vp);
 }
 
@@ -977,7 +983,9 @@ void frame(void* userdata) {
                     }
                 }
                 app.rivalContact=contact.hit;
-                recordTyreMarks(app,app.rival.car,app.rivalSkids,app.rival.braking,app.rival.braking?1.0f:0.0f);
+                if(rivalNear(app,250.0f))
+                    recordTyreMarks(app,app.rival.car,app.rivalSkids,app.rival.braking,app.rival.braking?1.0f:0.0f);
+                else for(int i=0;i<2;++i) app.rivalSkids.sample(i,false,{},0);
             }
             tickRace(app.race, app.car.ground.s, app.track.length, float(kFixedStepSec), app.track.closed,
                      app.track.raceStartS, app.track.raceFinishS);
@@ -1016,13 +1024,13 @@ void frame(void* userdata) {
     app.car.bodyHeave = app.suspensionVisual.heave(app.car.y);
     float pitch = app.suspensionVisual.pitch() + app.car.bodyPitch;
     float roll = app.suspensionVisual.roll() + app.car.bodyRoll;
-    if (app.battle && !app.titleScreen) {
+    if (app.battle && !app.titleScreen && rivalNear(app,300.0f)) {
         sampleWheelRoad(app,app.rival.car,app.rivalWheelRoad);
         app.rivalSuspension.update(app.rivalWheelRoad,app.paused?0.0f:float(elapsed));
         app.rival.car.bodyHeave=app.rivalSuspension.heave(app.rival.car.y);
         app.rivalPitch=app.rivalSuspension.pitch()+app.rival.car.bodyPitch;
         app.rivalRoll=app.rivalSuspension.roll()+app.rival.car.bodyRoll;
-    }
+    } else app.rivalSuspension.reset();
     updateCamera(app, pitch, roll, (app.paused || app.titleScreen) ? 0.0f : float(elapsed));
 
     // ブレーキランプ点灯中は、左右ランプの位置を履歴に残して光の軌跡にする。
@@ -1033,7 +1041,7 @@ void frame(void* userdata) {
             app.brakeTrail.record(lampL, lampR);
         }
         app.brakeTrail.update(float(elapsed));
-        if (app.battle && !app.titleScreen && app.rival.braking && app.rival.car.groundSpeed()>2.5f) {
+        if (app.battle && !app.titleScreen && rivalNear(app,250.0f) && app.rival.braking && app.rival.car.groundSpeed()>2.5f) {
             const Car& r=app.rival.car;
             app.rivalTrail.record(carPointWorld(r,app.rivalPitch,app.rivalRoll,{-.535f,.70f,-2.0f}),
                                   carPointWorld(r,app.rivalPitch,app.rivalRoll,{ .535f,.70f,-2.0f}));
@@ -1056,7 +1064,7 @@ void frame(void* userdata) {
                            float(elapsed));
         }
         app.smoke.update(float(elapsed));
-        if (app.battle && !app.titleScreen && app.rival.car.drifting) {
+        if (app.battle && !app.titleScreen && rivalNear(app,200.0f) && app.rival.car.drifting) {
             const Car& r=app.rival.car;
             Vec3 f{std::sin(r.yaw),0,std::cos(r.yaw)}, right{f.z,0,-f.x};
             Vec3 base{r.x,r.y+0.12f,r.z}; base=base-f*1.38f;

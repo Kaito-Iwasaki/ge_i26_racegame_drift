@@ -35,7 +35,7 @@ struct Rival {
         const float rx=std::cos(p.yaw),rz=-std::sin(p.yaw);
         car.x=p.x+rx*lane;car.z=p.z+rz*lane;car.y=p.y+p.cross*lane;
         car.yaw=wrapPi(p.yaw+drift);
-        car.velX=std::sin(p.yaw)*speed+rx*laneVelocity;car.velZ=std::cos(p.yaw)*speed+rz*laneVelocity;
+        car.velX=-rz*speed+rx*laneVelocity;car.velZ=rx*speed+rz*laneVelocity;
         car.speed=speed*std::cos(drift);car.velForward=car.speed;
         car.velLateral=car.velX*std::cos(car.yaw)-car.velZ*std::sin(car.yaw);
         car.slipAngle=std::atan2(car.velLateral,std::fabs(car.velForward)+.001f);
@@ -121,7 +121,7 @@ struct Rival {
         sync(t,dt);
         // The sprung body reacts to acceleration and lateral load, independently
         // of the visual road-height suspension used by the renderer.
-        const float pathYaw=pose(t,s).yaw;
+        const float pathYaw=car.ground.yaw;
         const float latAccel=clampf(wrapPi(pathYaw-previousYaw)*speed/dt,-25.0f,25.0f);
         const float rollTarget=clampf(latAccel*.0058f,-.08f,.08f);
         car.bodyRollVel+=((rollTarget-car.bodyRoll)*32.0f-car.bodyRollVel*8.0f)*dt;

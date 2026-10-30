@@ -18,6 +18,12 @@ int main(){
     marks.update(25);marks.build({0,2,0},vertices,indices);assert(vertices[6]<.5f);
     marks.update(5);assert(marks.segments.empty());
     marks.clear();
+    marks.sample(0,true,edge(0,0),1);marks.sample(0,true,edge(0,1),1);
+    marks.update(20);marks.sample(0,true,edge(0,2),1);
+    marks.update(10);assert(marks.segments.size()==1);
+    marks.build({0,2,0},vertices,indices);assert(!vertices.empty() && vertices[6]>.5f);
+    marks.update(20);assert(marks.segments.empty());
+    marks.clear();
     for(int i=0;i<2105;++i)marks.sample(0,true,edge(0,float(i)),1);
     assert(marks.segments.size()==SkidMarks::kMaxSegments);
     marks.clear();assert(marks.segments.empty()&&!marks.connected[0]);
