@@ -67,29 +67,32 @@ struct Rival {
     }
     void update(const Track& t,float dt, float playerS=-1.0f, float playerSpeed=0.0f) {
         if(dt<=0 || t.samples.size()<2)return;
-        (void)playerSpeed;
         const auto near=pose(t,s+4), ahead=pose(t,s+45);
         const float bend=wrapPi(ahead.yaw-near.yaw);
         const float absBend=std::fabs(bend);
-        const float corner[3]={23.0f,26.0f,30.0f};
+        const float corner[3]={21.0f,24.3f,30.0f};
         const float curve=clampf((absBend-.10f)/.75f,0,1);
         float target=finished?0.0f:VehicleTuning::maxSpeed+(corner[level]-VehicleTuning::maxSpeed)*curve;
         const float progress=t.closed ? distanceTravelled/std::max(1.0f,t.length) :
             (s-t.raceStartS)/std::max(1.0f,t.raceFinishS-t.raceStartS);
-        const bool follow=playerS>=0.0f && !finished && (level==0 || (level==1 && progress<0.5f));
-        if (follow) {
-            float gap=playerS-s;
+        if (playerS>=0.0f && !finished && level<2) {
+            float gap=playerS-s; // positive: the player is ahead
             if(t.closed && t.length>0) {
                 if(gap>t.length*.5f) gap-=t.length;
                 if(gap<-t.length*.5f) gap+=t.length;
             }
-            // Give the player a reasonable lead/deficit without matching their speed.
-            // Even when far ahead the rival keeps racing at most 12% below its plan.
-            const float lead=clampf((-gap-120.0f)/250.0f,0.0f,1.0f);
-            const float behind=clampf((gap-40.0f)/150.0f,0.0f,1.0f);
-            const float adaptive=std::min(VehicleTuning::maxSpeed,target*(1.0f-.12f*lead+.05f*behind));
-            const float weight=level==0?1.0f:clampf((0.50f-progress)/0.10f,0,1);
-            target += (adaptive-target)*weight;
+            // Ease the rival's lead without stopping it or copying the player's speed.
+            // NORMAL's lead adjustment fades out by the middle of the course.
+            const float leadAllowance=level==0?60.0f:80.0f;
+            const float lead=clampf((-gap-leadAllowance)/180.0f,0.0f,1.0f);
+            const float leadWeight=level==0?1.0f:clampf((0.50f-progress)/0.10f,0,1);
+            const float reduction=level==0?.28f:.22f;
+            target *= 1.0f-reduction*lead*leadWeight;
+            // A player far ahead may be matched through corners, without exceeding
+            // the same speed or acceleration limits as the player's car.
+            const float catchUp=clampf((gap-200.0f)/100.0f,0.0f,1.0f);
+            const float match=clampf(playerSpeed+2.0f,0.0f,VehicleTuning::maxSpeed);
+            target += (std::max(target,match)-target)*catchUp;
         }
         braking=speed>target+.6f;
         const float previousSpeed=speed;
