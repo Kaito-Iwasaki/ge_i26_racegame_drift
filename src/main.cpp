@@ -94,6 +94,7 @@ struct Orbit {
     Vec3 look{0, 0, 0};
     Vec3 up{0, 1, 0};
     int mode = 0;
+    CameraBlend blend;
 };
 
 struct App {
@@ -462,19 +463,17 @@ void tickRace(Race& race, float s, float length, float dt, bool closed = true) {
     race.lap += dt;
 }
 
-void updateCamera(App& app, float pitch, float roll) {
+void updateCamera(App& app, float pitch, float roll, float dt) {
     Orbit& cam = app.camera;
-    const CameraPose pose = carCameraPose(app.car, cam.mode, pitch, roll);
-    cam.eye = pose.eye;
-    cam.look = pose.look;
-    cam.up = pose.up;
-    if (cam.mode != kHoodCameraMode) {
-        // Keep a chase camera above the road on steep slopes.
-        TrackPose under = app.track.query(cam.eye.x, cam.eye.z, app.car.y, app.car.ground.s);
-        if (under.found && under.xzDist < 30.0f && cam.eye.y < under.centerY + 0.8f) {
-            cam.eye.y = under.centerY + 0.8f;
-        }
-    }
+    CameraPose chase = carCameraPose(app.car, 0, pitch, roll);
+    // Apply road clearance to the chase endpoint before blending.
+    TrackPose under = app.track.query(chase.eye.x, chase.eye.z, app.car.y, app.car.ground.s);
+    if (under.found && under.xzDist < 30.0f && chase.eye.y < under.centerY + 0.8f)
+        chase.eye.y = under.centerY + 0.8f;
+    const CameraPose hood = carCameraPose(app.car, kHoodCameraMode, pitch, roll);
+    cam.blend.update(cam.mode, dt);
+    const CameraPose pose = cam.blend.apply(chase, hood);
+    cam.eye = pose.eye; cam.look = pose.look; cam.up = pose.up;
 }
 
 void drawMinimap(App& app) {
@@ -600,7 +599,7 @@ void drawTitle(App& app) {
     text(44,344,1.6f,"TIME OF DAY",.95f,.59f,.25f);
     drawMenuButton(hud,m.title(0),"DAY",app.menuSelection==0,!app.night);
     drawMenuButton(hud,m.title(1),"NIGHT",app.menuSelection==1,app.night);
-    drawMenuButton(hud,m.title(2),"START RACE",app.menuSelection==2,true);
+    drawMenuButton(hud,m.title(2),"START RACE",app.menuSelection==2,false);
     text(44,520,1.2f,"MOUSE / ARROWS / STICK   ENTER / A: SELECT",.7f,.77f,.82f);
     hud.flushHud();
 }
@@ -665,8 +664,6 @@ void drawHud(App& app) {
     hud.drawText(24, 116, 2.0f, line, 0.9f, 0.9f, 0.92f, 1);
 
     const char* camName = "CHASE";
-    if (app.camera.mode == 1) camName = "CLOSE";
-    if (app.camera.mode == 2) camName = "FAR";
     if (app.camera.mode == kHoodCameraMode) camName = "HOOD";
     hud.drawText(float(hud.width) - 140, 22, 2.0f, camName, 0.8f, 0.84f, 0.88f, 1);
     std::snprintf(line, sizeof(line), "%d FPS", static_cast<int>(std::lround(app.fps)));
@@ -889,7 +886,7 @@ void frame(void* userdata) {
     app.car.bodyHeave = app.suspensionVisual.heave(app.car.y);
     float pitch = app.suspensionVisual.pitch() + app.car.bodyPitch;
     float roll = app.suspensionVisual.roll() + app.car.bodyRoll;
-    updateCamera(app, pitch, roll);
+    updateCamera(app, pitch, roll, (app.paused || app.titleScreen) ? 0.0f : float(elapsed));
 
     // ブレーキランプ点灯中は、左右ランプの位置を履歴に残して光の軌跡にする。
     if (!app.paused) {

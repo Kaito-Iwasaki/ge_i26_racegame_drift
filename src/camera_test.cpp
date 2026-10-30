@@ -8,7 +8,7 @@ int main(){
     for(float yaw:{-3.13f,-1.2f,0.f,1.4f,3.13f}) {
         car.yaw=yaw;
         Vec3 f{std::sin(yaw),0,std::cos(yaw)},r{std::cos(yaw),0,-std::sin(yaw)}, pos{car.x,car.y,car.z};
-        for(int mode=0;mode<3;++mode){
+        for(int mode=0;mode<1;++mode){
             auto cam=carCameraPose(car,mode,.1f,.1f);
             assert(std::fabs(dot(cam.eye-pos,r))<.0001f);
             assert(dot(cam.eye-pos,f)<0);
@@ -27,6 +27,24 @@ int main(){
             assert(dot(point,dir)<0.0f);
         }
     }
-    assert(kCameraModeCount==4);
-    std::puts("PASS: chase rigid behind yaw through wrap and slip; front camera mount and body outside view");
+    assert(kCameraModeCount==2);
+    CameraBlend blend;
+    auto chase=carCameraPose(car,0,0,0), hood=carCameraPose(car,kHoodCameraMode,0,0);
+    blend.update(kHoodCameraMode,0);
+    assert(length(blend.apply(chase,hood).eye-chase.eye)<.0001f);
+    blend.update(kHoodCameraMode,.5f);
+    assert(std::fabs(blend.weight-.5f)<.0001f);
+    auto middle=blend.apply(chase,hood);
+    assert(length(middle.eye-(chase.eye+hood.eye)*.5f)<.0001f);
+    blend.update(kHoodCameraMode,.5f);
+    assert(length(blend.apply(chase,hood).eye-hood.eye)<.0001f);
+    blend.update(0,.25f);
+    float before=blend.weight;
+    blend.update(kHoodCameraMode,0);
+    assert(std::fabs(blend.weight-before)<.0001f);
+    blend.update(kHoodCameraMode,1);
+    assert(std::fabs(blend.weight-1)<.0001f);
+    blend.update(0,1);
+    assert(std::fabs(blend.weight)<.0001f);
+    std::puts("PASS: chase rigid behind yaw through wrap and slip; front camera mount, body outside view and smooth one-second transitions");
 }
