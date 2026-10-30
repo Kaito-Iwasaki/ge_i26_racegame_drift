@@ -1178,7 +1178,7 @@ void frame(void* userdata) {
         const Vec3 mirrorEye=carPointWorld(app.car,pitch,roll,{0,1.35f,-2.38f});
         const Vec3 rearPoint=carPointWorld(app.car,pitch,roll,{0,1.35f,-22.38f});
         const Vec3 mirrorUp=normalize(carPointWorld(app.car,pitch,roll,{0,2.35f,-2.38f})-mirrorEye);
-        Mat4 mirrorProj=perspective(68.0f*3.14159265f/180.0f,float(mw)/float(mh),.15f,700.0f);
+        Mat4 mirrorProj=perspective(44.0f*3.14159265f/180.0f,float(mw)/float(mh),.15f,700.0f);
         mirrorProj.m[0]*=-1.0f;
         const Mat4 mirrorVP=mul(mirrorProj,lookAt(mirrorEye,rearPoint,mirrorUp));
         app.renderer.beginMirror(mx,my,mw,mh);
