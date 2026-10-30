@@ -2,6 +2,7 @@
 #include "camera.hpp"
 #include "menu.hpp"
 #include "rival.hpp"
+#include "vehicle_collision.hpp"
 #include "flare.hpp"
 #include "wheel_pose.hpp"
 #include "suspension_visual.hpp"
@@ -117,6 +118,7 @@ struct App {
     float rivalPitch=0, rivalRoll=0;
     std::vector<float> flareVerts;
     std::vector<unsigned> flareIndices;
+    bool rivalContact = false;
     int battleResult = 0; // 0 ongoing, 1 player wins, -1 rival wins
     bool battle = false;
     int difficulty = 1;
@@ -400,7 +402,7 @@ void resetRace(App& app) {
     app.car.reset(app.track);
     if (app.battle && app.car.ground.found) {
         // Put the player and rival on separate sides of the same starting line.
-        const float lane=1.60f;
+        const float lane=2.10f;
         app.car.x += app.car.ground.rightX*lane;
         app.car.z += app.car.ground.rightZ*lane;
         app.car.ground=app.track.query(app.car.x,app.car.z,app.car.y,app.car.ground.s);
@@ -412,6 +414,7 @@ void resetRace(App& app) {
     app.rivalSkids.clear();
     app.rivalTrail.clear();
     app.battleResult=0;
+    app.rivalContact=false;
     app.race = Race{};
     if (app.battle && app.track.closed) { app.race.timing=true; app.race.prevS=app.car.ground.s; }
     app.countdown.reset();
@@ -953,6 +956,27 @@ void frame(void* userdata) {
             }
             if (app.battle) {
                 app.rival.update(app.track, float(kFixedStepSec)*kDrivingPace, app.car.ground.s, app.car.groundSpeed());
+                const VehicleContact contact=resolveVehicleContact(app.car,app.rival.car);
+                if (contact.hit) {
+                    app.rival.acceptContact(app.track);
+                    TrackPose p=app.track.query(app.car.x,app.car.z,app.car.y,app.car.ground.s);
+                    if(p.found) {
+                        app.car.ground=p;
+                        const float edge=app.track.halfWidth+app.track.curbWidth;
+                        app.car.y=p.centerY+clampf(p.lateral,-edge,edge)*p.cross;
+                    }
+                    const float cs=std::cos(app.car.yaw), sn=std::sin(app.car.yaw);
+                    app.car.velForward=app.car.velX*sn+app.car.velZ*cs;
+                    app.car.velLateral=app.car.velX*cs-app.car.velZ*sn;
+                    app.car.speed=app.car.velForward;
+                    if (!app.rivalContact) {
+                        app.rumble.collision(contact.impact,contact.normal.x*cs-contact.normal.z*sn);
+                        app.surfaceEffects.emitSparks(contact.point,{app.car.velX,0,app.car.velZ},
+                                                      contact.normal*-1.0f,contact.impact,0.0f,
+                                                      float(kFixedStepSec),true);
+                    }
+                }
+                app.rivalContact=contact.hit;
                 recordTyreMarks(app,app.rival.car,app.rivalSkids,app.rival.braking,app.rival.braking?1.0f:0.0f);
             }
             tickRace(app.race, app.car.ground.s, app.track.length, float(kFixedStepSec), app.track.closed,

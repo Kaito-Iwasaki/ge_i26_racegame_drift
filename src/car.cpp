@@ -1,16 +1,17 @@
 #include "car.hpp"
+#include "vehicle_tuning.hpp"
 
 #include <cmath>
 
 namespace {
 
-constexpr float kMaxSpeed = 160.0f / 3.6f;
+constexpr float kMaxSpeed = VehicleTuning::maxSpeed;
 constexpr float kMaxReverse = 9.0f;
-constexpr float kAccel = 15.0f;
-constexpr float kBrake = 12.0f;
+constexpr float kAccel = VehicleTuning::acceleration;
+constexpr float kBrake = VehicleTuning::brake;
 constexpr float kReverseAccel = 8.0f;
-constexpr float kDrag = 0.00028f;
-constexpr float kRolling = 0.9f;
+constexpr float kDrag = VehicleTuning::drag;
+constexpr float kRolling = VehicleTuning::rolling;
 constexpr float kWheelbase = 3.05f;
 constexpr float kSteerRate = 4.6f;
 constexpr float kSteerRateDrift = 5.0f;
@@ -251,10 +252,7 @@ void Car::update(float dt, const DriveInput& input, const Track& track) {
     } else if (reversing) {
         force -= input.brake * kReverseAccel;
     } else if (input.throttle > 0.0f) {
-        float ratio = clampf(groundSpeed() / kMaxSpeed, 0.0f, 1.0f);
-        const float boost = 1.0f + 0.3f * driftAmount;
-        const float traction = 1.0f - 0.15f * driftAmount;
-        float drive = kAccel * (1.0f - ratio * ratio) * boost * traction;
+        float drive = VehicleTuning::engineAcceleration(groundSpeed(), driftAmount);
         force += input.throttle * drive;
 
     }
