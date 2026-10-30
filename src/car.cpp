@@ -248,7 +248,7 @@ void Car::update(float dt, const DriveInput& input, const Track& track) {
         force -= input.brake * kBrake * (speed >= 0 ? 1.0f : -1.0f);
     } else if (reversing) {
         force -= input.brake * kReverseAccel;
-    } else if (input.throttle > 0.0f && speed > -0.4f) {
+    } else if (input.throttle > 0.0f) {
         float ratio = clampf(groundSpeed() / kMaxSpeed, 0.0f, 1.0f);
         const float boost = 1.0f + 0.3f * driftAmount;
         const float traction = 1.0f - 0.15f * driftAmount;
