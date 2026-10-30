@@ -886,11 +886,10 @@ void frame(void* userdata) {
         activate=activate || padPulse.start;
         if(padPulse.pause && app.paused) togglePause=true;
         if(padPulse.pause && app.titleScreen) start=true;
-        const bool padMoved = (padPulse.menuUp && !app.menuPadUp) || (padPulse.menuDown && !app.menuPadDown) ||
-                              (padPulse.menuLeft && !app.menuPadLeft) || (padPulse.menuRight && !app.menuPadRight);
+        const bool menuMoved = dx != 0 || dy != 0;
         app.menuSelection=menuMove(app.titleScreen,app.menuSelection,dx,dy,app.night,app.uphill,app.battle,app.difficulty);
-        // A controller selects settings as the focus moves; START and pause buttons still require confirmation.
-        if (app.titleScreen && padMoved && app.menuSelection < 8) activate=true;
+        // Keyboard and controller movement selects settings; START and pause buttons require confirmation.
+        if (app.titleScreen && menuMoved && app.menuSelection < 8) activate=true;
 
     } else {
         if(padPulse.reset) reset=true;
