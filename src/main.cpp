@@ -154,7 +154,7 @@ struct App {
     bool uphill = false;
     bool titleScreen = true;
     bool showHelp = true;
-    int menuSelection = 9;
+    int menuSelection = 8;
     bool menuPadUp = false, menuPadDown = false, menuPadLeft = false, menuPadRight = false;
     bool menuPadConfirm = false;
     double accumulator = 0;
@@ -640,13 +640,11 @@ void drawTitle(App& app) {
     text(44,269,1.5f,"COURSE DIRECTION",.95f,.59f,.25f);
     drawMenuButton(hud,m.title(2),"DOWNHILL",app.menuSelection==2,!app.uphill);
     drawMenuButton(hud,m.title(3),app.track.closed || !app.track.touge?"UPHILL N/A":"UPHILL",app.menuSelection==3,app.uphill);
-    text(44,327,1.5f,"GAME MODE",.95f,.59f,.25f);
-    drawMenuButton(hud,m.title(4),"TIME ATTACK",app.menuSelection==4,!app.battle);
-    drawMenuButton(hud,m.title(5),"BATTLE",app.menuSelection==5,app.battle);
-    text(44,385,1.5f,app.battle?"RIVAL DIFFICULTY":"RIVAL DIFFICULTY - BATTLE ONLY",.95f,.59f,.25f);
-    const char* levels[3]={"EASY","NORMAL","HARD"};
-    for(int i=0;i<3;i++)drawMenuButton(hud,m.title(i+6),levels[i],app.menuSelection==i+6,app.battle && app.difficulty==i);
-    drawMenuButton(hud,m.title(9),"START RACE",app.menuSelection==9,false);
+    text(44,327,1.5f,"RIVAL DIFFICULTY (NONE: TIME ATTACK)",.95f,.59f,.25f);
+    const char* levels[4]={"NONE","EASY","NORMAL","HARD"};
+    for(int i=0;i<4;i++)drawMenuButton(hud,m.title(i+4),levels[i],app.menuSelection==i+4,
+                                       i==0 ? !app.battle : app.battle && app.difficulty==i-1);
+    drawMenuButton(hud,m.title(8),"START RACE",app.menuSelection==8,false);
     text(44,520,1.2f,"MOUSE / ARROWS / STICK   ENTER / A: SELECT",.7f,.77f,.82f);
     hud.flushHud();
 }
@@ -818,6 +816,9 @@ void drawFlares(App& app,Vec3 camera,Vec3 look,Vec3 up,const Mat4& vp,float play
 
 void frame(void* userdata) {
     App& app = *static_cast<App*>(userdata);
+    int inputW = 0, inputH = 0;
+    SDL_GL_GetDrawableSize(app.window, &inputW, &inputH);
+    if (inputW > 0 && inputH > 0) app.renderer.resize(inputW, inputH);
     SDL_Event event;
     bool reset = false, activate = false, start = false, togglePause = false;
     int dx = 0, dy = 0;
@@ -885,7 +886,12 @@ void frame(void* userdata) {
         activate=activate || padPulse.start;
         if(padPulse.pause && app.paused) togglePause=true;
         if(padPulse.pause && app.titleScreen) start=true;
+        const bool padMoved = (padPulse.menuUp && !app.menuPadUp) || (padPulse.menuDown && !app.menuPadDown) ||
+                              (padPulse.menuLeft && !app.menuPadLeft) || (padPulse.menuRight && !app.menuPadRight);
         app.menuSelection=menuMove(app.titleScreen,app.menuSelection,dx,dy,app.night,app.uphill,app.battle,app.difficulty);
+        // A controller selects settings as the focus moves; START and pause buttons still require confirmation.
+        if (app.titleScreen && padMoved && app.menuSelection < 8) activate=true;
+
     } else {
         if(padPulse.reset) reset=true;
         if(padPulse.pause) togglePause=true;
@@ -904,13 +910,12 @@ void frame(void* userdata) {
         else if(app.menuSelection==2) app.uphill=false;
         else if(app.menuSelection==3) { if(!app.track.closed && app.track.touge) app.uphill=true; }
         else if(app.menuSelection==4) app.battle=false;
-        else if(app.menuSelection==5) app.battle=true;
-        else if(app.menuSelection>=6 && app.menuSelection<=8) app.difficulty=app.menuSelection-6;
+        else if(app.menuSelection>=5 && app.menuSelection<=7) { app.battle=true; app.difficulty=app.menuSelection-5; }
         else start=true;
     } else if (activate && app.paused) {
         if(app.menuSelection==0) app.paused=false;
         else if(app.menuSelection==1) { app.paused=false; reset=true; }
-        else { app.paused=false; app.titleScreen=true; app.menuSelection=9; reset=true; }
+        else { app.paused=false; app.titleScreen=true; app.menuSelection=8; reset=true; }
     }
     if (start && app.titleScreen) {
         app.track.setUphill(app.uphill);
