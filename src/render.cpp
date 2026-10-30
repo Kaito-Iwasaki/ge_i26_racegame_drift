@@ -47,7 +47,8 @@ in vec3 vColor;
 in vec3 vWorld;
 uniform vec3 uCamPos;
 uniform float uNight;
-uniform vec3 uLampLeft, uLampRight, uLampDir;
+uniform vec3 uLampLeft, uLampRight, uLampDir, uRearLight;
+uniform float uBrakeOn, uReverseOn;
 uniform float uEmissive;
 out vec4 fragColor;
 float beam(vec3 position, vec3 lamp) {
@@ -55,7 +56,7 @@ float beam(vec3 position, vec3 lamp) {
     vec3 horizontal = normalize(vec3(uLampDir.x, 0.0, uLampDir.z));
     float along = dot(offset.xz, horizontal.xz);
     float across = abs(offset.x * horizontal.z - offset.z * horizontal.x);
-    float width = 0.9 + max(along, 0.0) * 0.20;
+    float width = 1.2 + max(along, 0.0) * 0.34;
     float cone = 1.0 - smoothstep(width * 0.55, width, across);
     float range = smoothstep(0.2, 2.5, along) * (1.0 - smoothstep(40.0, 95.0, along));
     float expectedY = lamp.y + along * (uLampDir.y - 0.025);
@@ -72,6 +73,16 @@ void main() {
         float lamps = max(beam(vWorld, uLampLeft), beam(vWorld, uLampRight));
         vec3 moon = vec3(0.12, 0.16, 0.24);
         color = vColor * (moon + vec3(1.45, 1.32, 1.05) * lamps);
+    }
+    if (uBrakeOn > 0.5 || uReverseOn > 0.5) {
+        vec3 offset = vWorld - uRearLight;
+        vec2 fwd = normalize(uLampDir.xz);
+        float behind = -dot(offset.xz, fwd);
+        float spread = length(offset.xz);
+        float reach = (1.0 - smoothstep(1.0, 8.0, spread)) * smoothstep(-0.5, 1.0, behind);
+        float vertical = 1.0 - smoothstep(1.5, 4.0, abs(offset.y));
+        float intensity = reach * vertical * mix(0.30, 1.0, uNight);
+        color += vColor * intensity * (uBrakeOn * vec3(1.6, 0.035, 0.02) + uReverseOn * vec3(0.60, 0.58, 0.48));
     }
     if (uEmissive > 0.5) color = vColor;
     float dist = distance(vWorld, uCamPos);
@@ -272,6 +283,9 @@ bool Renderer::init() {
     uLampLeft = glGetUniformLocation(worldProgram, "uLampLeft");
     uLampRight = glGetUniformLocation(worldProgram, "uLampRight");
     uLampDir = glGetUniformLocation(worldProgram, "uLampDir");
+    uRearLight = glGetUniformLocation(worldProgram, "uRearLight");
+    uBrakeOn = glGetUniformLocation(worldProgram, "uBrakeOn");
+    uReverseOn = glGetUniformLocation(worldProgram, "uReverseOn");
     uEmissive = glGetUniformLocation(worldProgram, "uEmissive");
     uSkyNight = glGetUniformLocation(skyProgram, "uNight");
     uOrtho = glGetUniformLocation(hudProgram, "uOrtho");
@@ -346,7 +360,7 @@ void Renderer::drawSky(bool night) {
     glEnable(GL_DEPTH_TEST);
 }
 
-void Renderer::beginWorld(const Mat4& viewProj, Vec3 cameraPos, bool night, Vec3 lampLeft, Vec3 lampRight, Vec3 lampDirection) {
+void Renderer::beginWorld(const Mat4& viewProj, Vec3 cameraPos, bool night, Vec3 lampLeft, Vec3 lampRight, Vec3 lampDirection, Vec3 rearLight, bool braking, bool reversing) {
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
     glUseProgram(worldProgram);
@@ -356,6 +370,9 @@ void Renderer::beginWorld(const Mat4& viewProj, Vec3 cameraPos, bool night, Vec3
     glUniform3f(uLampLeft, lampLeft.x, lampLeft.y, lampLeft.z);
     glUniform3f(uLampRight, lampRight.x, lampRight.y, lampRight.z);
     glUniform3f(uLampDir, lampDirection.x, lampDirection.y, lampDirection.z);
+    glUniform3f(uRearLight, rearLight.x, rearLight.y, rearLight.z);
+    glUniform1f(uBrakeOn, braking ? 1.0f : 0.0f);
+    glUniform1f(uReverseOn, reversing ? 1.0f : 0.0f);
     glUniform1f(uEmissive, 0.0f);
 }
 

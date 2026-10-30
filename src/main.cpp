@@ -108,6 +108,7 @@ struct App {
     GpuMesh body;
     GpuMesh brakeLights;
     GpuMesh headlights;
+    GpuMesh reverseLights;
     GpuMesh wheel;
     GpuMesh shadow;
     bool braking = false;  // 今フレームのブレーキ入力（ブレーキランプ点灯用）
@@ -645,10 +646,10 @@ void drawHud(App& app) {
 
     if (app.showHelp) {
         hud.drawText(24, float(hud.height) - 78, 1.7f,
-                     "W/UP ACCEL  S/DOWN BRAKE  A/D STEER  SPACE DRIFT  N DAY/NIGHT",
+                     "W/UP ACCEL  S/DOWN BRAKE  A/D STEER  SPACE DRIFT",
                      0.9f, 0.92f, 0.94f, 1);
         hud.drawText(24, float(hud.height) - 54, 1.7f,
-                     "C CAMERA  R RESET  P PAUSE  PAD: RT/LT ACCEL/BRAKE  A DRIFT  B DAY/NIGHT",
+                     "C CAMERA  R RESET  P PAUSE  PAD: RT/LT ACCEL/BRAKE  A DRIFT",
                      0.75f, 0.8f, 0.84f, 1);
     }
     hud.drawText(float(hud.width) - 250, float(hud.height) - 28, 1.6f, "(C) OSM / GSI", 0.85f, 0.88f, 0.9f, 1);
@@ -701,7 +702,7 @@ void frame(void* userdata) {
         } else if (event.type == SDL_KEYDOWN && !event.key.repeat) {
             SDL_Scancode code = event.key.keysym.scancode;
             if (code == SDL_SCANCODE_ESCAPE) app.running = false;
-            else if (code == SDL_SCANCODE_N) app.night = !app.night;
+            else if (code == SDL_SCANCODE_N && app.titleScreen) app.night = !app.night;
             else if (app.titleScreen) { if (code == SDL_SCANCODE_RETURN || code == SDL_SCANCODE_KP_ENTER) start = true; }
             else if (code == SDL_SCANCODE_R) reset = true;
             else if (code == SDL_SCANCODE_C) app.camera.mode = (app.camera.mode + 1) % kCameraModeCount;
@@ -715,7 +716,7 @@ void frame(void* userdata) {
             app.pad = nullptr;
         } else if (event.type == SDL_CONTROLLERBUTTONDOWN) {
 #ifndef __EMSCRIPTEN__
-            if (event.cbutton.button == SDL_CONTROLLER_BUTTON_B) app.night = !app.night;
+            if (event.cbutton.button == SDL_CONTROLLER_BUTTON_B && app.titleScreen) app.night = !app.night;
             else
 #endif
             if (app.titleScreen) {
@@ -727,7 +728,7 @@ void frame(void* userdata) {
     }
     PadPulse padPulse;
     DriveInput input = readDrive(app.pad, padPulse);
-    if (padPulse.night) app.night = !app.night;
+    if (padPulse.night && app.titleScreen) app.night = !app.night;
     if (app.titleScreen) {
         start = start || padPulse.start || padPulse.pause;
     } else {
@@ -870,14 +871,16 @@ void frame(void* userdata) {
     const Vec3 lampLeft = carPointWorld(app.car, pitch, roll, {-0.52f, 0.60f, 2.18f});
     const Vec3 lampRight = carPointWorld(app.car, pitch, roll, {0.52f, 0.60f, 2.18f});
     const Vec3 lampDirection = normalize(carPointWorld(app.car, pitch, roll, {0,0,1}) - carPointWorld(app.car, pitch, roll, {0,0,0}));
-    app.renderer.beginWorld(viewProj, app.camera.eye, app.night, lampLeft, lampRight, lampDirection);
+    const Vec3 rearLight = carPointWorld(app.car, pitch, roll, {0, 0.70f, -2.05f});
+    const bool reversing = reverseLightsActive(app.car.speed, app.car.brakeHold);
+    app.renderer.beginWorld(viewProj, app.camera.eye, app.night, lampLeft, lampRight, lampDirection, rearLight, app.braking, reversing);
 
     app.renderer.drawCourse(app.course, viewProj);
     // Marks lie just above the road and use ordinary translucent blending.
     app.skidMarks.build(app.camera.eye, app.skidVerts, app.skidIndices);
     app.renderer.drawGlow(app.skidVerts.data(), int(app.skidVerts.size()/7),
                           app.skidIndices.data(), int(app.skidIndices.size()), viewProj, false);
-    app.renderer.beginWorld(viewProj, app.camera.eye, app.night, lampLeft, lampRight, lampDirection);
+    app.renderer.beginWorld(viewProj, app.camera.eye, app.night, lampLeft, lampRight, lampDirection, rearLight, app.braking, reversing);
     Mat4 shadow = mul(translation(app.car.x, app.car.y + 0.08f, app.car.z), rotationY(app.car.yaw));
     app.renderer.draw(app.shadow, shadow);
 
@@ -887,6 +890,7 @@ void frame(void* userdata) {
         app.renderer.drawEmissive(app.brakeLights, model);
     }
     if (app.night) app.renderer.drawEmissive(app.headlights, model);
+    if (reversing) app.renderer.drawEmissive(app.reverseLights, model);
     // The wheels track the road separately from the sprung body.
     for (int axle = 0; axle < 2; ++axle) {
         for (int side = 0; side < 2; ++side) {
@@ -1094,16 +1098,19 @@ int main(int argc, char** argv) {
     CpuMesh body;
     CpuMesh brakeLights;
     CpuMesh headlights;
+    CpuMesh reverseLights;
     CpuMesh wheel;
     CpuMesh shadow;
     buildCarBody(body);
     buildCarBrakeLights(brakeLights);
     buildCarHeadlights(headlights);
+    buildCarReverseLights(reverseLights);
     buildCarWheel(wheel);
     buildCarShadow(shadow);
     app.body = app.renderer.upload(body);
     app.brakeLights = app.renderer.upload(brakeLights);
     app.headlights = app.renderer.upload(headlights);
+    app.reverseLights = app.renderer.upload(reverseLights);
     app.wheel = app.renderer.upload(wheel);
     app.shadow = app.renderer.upload(shadow);
     app.car.reset(app.track);

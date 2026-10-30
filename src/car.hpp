@@ -14,6 +14,10 @@ inline bool brakeLightsActive(const DriveInput& input, float forwardSpeed) {
     return input.handbrake || (input.brake > 0.05f && forwardSpeed > -0.5f);
 }
 
+inline bool reverseLightsActive(float forwardSpeed, float brakeHold) {
+    return forwardSpeed < -0.15f || brakeHold > 0.28f;
+}
+
 struct Car {
     float x = 0;
     float y = 0;
@@ -75,6 +79,7 @@ void buildCarBody(CpuMesh& mesh);
 // ブレーキ時だけ重ねて描く明るい赤のテールランプ（車体メッシュのテールより少し外側）。
 void buildCarBrakeLights(CpuMesh& mesh);
 void buildCarHeadlights(CpuMesh& mesh);
+void buildCarReverseLights(CpuMesh& mesh);
 void buildCarWheel(CpuMesh& mesh);
 void buildCarShadow(CpuMesh& mesh);
 Mat4 carModelMatrix(const Car& car, float pitch, float roll);

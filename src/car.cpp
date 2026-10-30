@@ -424,6 +424,12 @@ void buildCarBrakeLights(CpuMesh& mesh) {
     mesh.addBox({-0.775f, 0.625f, -2.045f}, {-0.295f, 0.775f, -1.955f}, lit);
 }
 
+void buildCarReverseLights(CpuMesh& mesh) {
+    const Vec3 white{1.0f, 0.98f, 0.88f};
+    mesh.addBox({0.08f, 0.64f, -2.055f}, {0.25f, 0.76f, -2.025f}, white);
+    mesh.addBox({-0.25f, 0.64f, -2.055f}, {-0.08f, 0.76f, -2.025f}, white);
+}
+
 void buildCarHeadlights(CpuMesh& mesh) {
     const Vec3 glow{1.0f, 0.95f, 0.72f};
     // Bright lenses sit on the front face of the two retractable headlamps.
