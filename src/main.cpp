@@ -134,9 +134,10 @@ struct App {
     bool running = true;
     bool paused = false;
     bool night = false;
+    bool uphill = false;
     bool titleScreen = true;
     bool showHelp = true;
-    int menuSelection = 2;
+    int menuSelection = 4;
     bool menuPadUp = false, menuPadDown = false, menuPadLeft = false, menuPadRight = false;
     bool menuPadConfirm = false;
     double accumulator = 0;
@@ -428,14 +429,15 @@ void recordTyreMarks(App& app, const DriveInput& input) {
     }
 }
 
-void tickRace(Race& race, float s, float length, float dt, bool closed = true) {
+void tickRace(Race& race, float s, float length, float dt, bool closed = true, float startS = 0.0f, float finishS = -1.0f) {
     if (!closed) {
         // 一方向の下り: スタート直後から計時し、ゴールライン到達で確定する。
         if (!race.finished) {
-            if (s > 5.0f) {
+            if (s > startS + 5.0f) {
                 race.timing = true;
             }
-            if (race.prevS > length * 0.5f && s >= length - 3.0f) {
+            if (finishS < 0.0f) finishS = length;
+            if (race.prevS > (startS + finishS) * 0.5f && s >= finishS) {
                 race.finished = true;
                 race.timing = false;
                 race.completed = 1;
@@ -528,8 +530,8 @@ void drawMinimap(App& app) {
         app.renderer.addQuad(mx - 4, my - 4, mx + 4, my + 4, r, g, b, 1);
     };
     if (n > 0) {
-        marker(app.track.samples[0].x, app.track.samples[0].z, 0.25f, 0.85f, 0.35f);
-        marker(app.track.samples[n - 1].x, app.track.samples[n - 1].z, 0.90f, 0.25f, 0.20f);
+        marker(app.track.samples[app.track.startGate].x, app.track.samples[app.track.startGate].z, 0.25f, 0.85f, 0.35f);
+        marker(app.track.samples[app.track.finishGate].x, app.track.samples[app.track.finishGate].z, 0.90f, 0.25f, 0.20f);
     }
     // 自車マーカー（赤い三角、従来より少し大きめ）。
     float mx = x0 + size * 0.5f;
@@ -550,7 +552,8 @@ void drawMinimap(App& app) {
     // 全体の進行度バー（ミニマップの下）: チェックポイントに目盛り。
     float barY = y0 + size + 6.0f;
     app.renderer.addQuad(x0, barY, x0 + size, barY + 7.0f, 0.10f, 0.11f, 0.13f, 0.85f);
-    float frac = app.track.length > 0.0f ? app.car.ground.s / app.track.length : 0.0f;
+    const float raceLength=app.track.raceFinishS-app.track.raceStartS;
+    float frac = raceLength > 0.0f ? (app.car.ground.s-app.track.raceStartS) / raceLength : 0.0f;
     if (frac < 0.0f) frac = 0.0f;
     if (frac > 1.0f) frac = 1.0f;
     app.renderer.addQuad(x0, barY, x0 + size * frac, barY + 7.0f, 0.30f, 0.75f, 0.95f, 0.95f);
@@ -560,7 +563,7 @@ void drawMinimap(App& app) {
         const std::string& nm = app.track.names[smp.nameId];
         if (nm.rfind("Check Point", 0) != 0) continue;
         if (i > 0 && app.track.samples[i - 1].nameId == smp.nameId) continue;
-        float tx = x0 + size * (smp.s / app.track.length);
+        float tx = x0 + size * clampf((smp.s-app.track.raceStartS) / std::max(1.0f, raceLength),0.0f,1.0f);
         app.renderer.addQuad(tx - 1, barY - 2.0f, tx + 1, barY + 9.0f, 0.9f, 0.9f, 0.9f, 0.9f);
     }
 }
@@ -584,7 +587,7 @@ void drawTitle(App& app) {
     hud.addQuad(l,t,l+810*s,t+5*s,1,0.55f,0.18f,1);
     auto text=[&](float x,float y,float size,const char* label,float r,float g,float b){hud.drawText(l+x*s,t+y*s,size*s,label,r,g,b,1);};
     text(44,35,5.0f,"RACE GAME DRIFT",1,.95f,.85f);
-    text(44,95,2.0f,"SELECT TIME OF DAY AND START",.95f,.59f,.25f);
+    text(44,95,2.0f,"SELECT TIME AND DIRECTION",.95f,.59f,.25f);
     text(44,145,2.4f,"CONTROLS",1,.95f,.85f);
     text(44,185,1.8f,"KEYBOARD",.95f,.59f,.25f);
     text(44,214,1.7f,"W / UP      ACCELERATE",.9f,.92f,.95f);
@@ -596,10 +599,13 @@ void drawTitle(App& app) {
     text(430,241,1.7f,"STICK     STEER",.9f,.92f,.95f);
     text(430,268,1.7f,"A / RB    HANDBRAKE",.9f,.92f,.95f);
     text(430,295,1.7f,"Y CAMERA  START PAUSE",.9f,.92f,.95f);
-    text(44,344,1.6f,"TIME OF DAY",.95f,.59f,.25f);
+    text(44,318,1.6f,"TIME OF DAY",.95f,.59f,.25f);
     drawMenuButton(hud,m.title(0),"DAY",app.menuSelection==0,!app.night);
     drawMenuButton(hud,m.title(1),"NIGHT",app.menuSelection==1,app.night);
-    drawMenuButton(hud,m.title(2),"START RACE",app.menuSelection==2,false);
+    text(44,386,1.6f,"COURSE DIRECTION",.95f,.59f,.25f);
+    drawMenuButton(hud,m.title(2),"DOWNHILL",app.menuSelection==2,!app.uphill);
+    drawMenuButton(hud,m.title(3),app.track.closed || !app.track.touge ? "UPHILL N/A" : "UPHILL",app.menuSelection==3,app.uphill);
+    drawMenuButton(hud,m.title(4),"START RACE",app.menuSelection==4,false);
     text(44,520,1.2f,"MOUSE / ARROWS / STICK   ENTER / A: SELECT",.7f,.77f,.82f);
     hud.flushHud();
 }
@@ -635,7 +641,7 @@ void drawHud(App& app) {
     if (!app.track.closed && app.race.finished) {
         std::snprintf(line, sizeof(line), "FINISH");
     } else if (!app.track.closed) {
-        std::snprintf(line, sizeof(line), "DOWNHILL");
+        std::snprintf(line, sizeof(line), app.track.uphill ? "UPHILL" : "DOWNHILL");
     } else if (!app.race.timing) {
         std::snprintf(line, sizeof(line), "OUT LAP");
     } else {
@@ -650,7 +656,8 @@ void drawHud(App& app) {
     std::snprintf(line, sizeof(line), "%s %s", app.track.closed ? "BEST" : "GOAL", best);
     hud.drawText(24, 90, 2.0f, line, 0.75f, 0.8f, 0.7f, 1);
 
-    int percent = static_cast<int>(app.car.ground.s / app.track.length * 100.0f);
+    const float raceLength=app.track.raceFinishS-app.track.raceStartS;
+    int percent = static_cast<int>((app.car.ground.s-app.track.raceStartS) / std::max(1.0f,raceLength) * 100.0f);
     if (percent > 100) percent = 100;
     if (percent < 0) percent = 0;
     const char* corner = app.track.nameOf(app.car.ground.nameId);
@@ -782,7 +789,7 @@ void frame(void* userdata) {
         activate=activate || padPulse.start;
         if(padPulse.pause && app.paused) togglePause=true;
         if(padPulse.pause && app.titleScreen) start=true;
-        app.menuSelection=menuMove(app.titleScreen,app.menuSelection,dx,dy,app.night);
+        app.menuSelection=menuMove(app.titleScreen,app.menuSelection,dx,dy,app.night,app.uphill);
     } else {
         if(padPulse.reset) reset=true;
         if(padPulse.pause) togglePause=true;
@@ -798,13 +805,18 @@ void frame(void* userdata) {
     if (activate && app.titleScreen) {
         if(app.menuSelection==0) app.night=false;
         else if(app.menuSelection==1) app.night=true;
+        else if(app.menuSelection==2) app.uphill=false;
+        else if(app.menuSelection==3) { if(!app.track.closed && app.track.touge) app.uphill=true; }
         else start=true;
     } else if (activate && app.paused) {
         if(app.menuSelection==0) app.paused=false;
         else if(app.menuSelection==1) { app.paused=false; reset=true; }
-        else { app.paused=false; app.titleScreen=true; app.menuSelection=2; reset=true; }
+        else { app.paused=false; app.titleScreen=true; app.menuSelection=4; reset=true; }
     }
-    if (start && app.titleScreen) { app.titleScreen=false; reset=true; }
+    if (start && app.titleScreen) {
+        app.track.setUphill(app.uphill);
+        app.titleScreen=false; reset=true;
+    }
     if (reset) resetRace(app);
 
     Uint64 now = SDL_GetPerformanceCounter();
@@ -854,7 +866,8 @@ void frame(void* userdata) {
                 app.surfaceEffects.emitMud(rear - right * 0.82f, rear + right * 0.82f,
                                            carVel, app.car.groundSpeed(), effectDt);
             }
-            tickRace(app.race, app.car.ground.s, app.track.length, float(kFixedStepSec), app.track.closed);
+            tickRace(app.race, app.car.ground.s, app.track.length, float(kFixedStepSec), app.track.closed,
+                     app.track.raceStartS, app.track.raceFinishS);
             app.accumulator -= kFixedStepSec;
             ++guard;
         }

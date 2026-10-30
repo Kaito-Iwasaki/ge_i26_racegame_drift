@@ -42,6 +42,10 @@ struct Track {
     float runoff = 8.0f;
     float length = 0;
     bool closed = true;
+    bool uphill = false;
+    int startGate = 0, finishGate = 0;
+    float raceStartS = 0, raceFinishS = 0;
+    float downhillSpawnX = 0, downhillSpawnY = 0, downhillSpawnZ = 0, downhillSpawnYaw = 0;
     bool touge = false;  // `style touge`: 峠仕様の見た目（ガードレール・林・センターライン）
     std::string title;
     float spawnX = 0;
@@ -53,6 +57,7 @@ struct Track {
     CpuMesh visual;
 
     bool load(const std::string& path);
+    bool setUphill(bool enabled);
     // preferS が 0 以上のときは、その周回位置に近い路面を優先する。立体交差で上下を取り違えない。
     TrackPose query(float x, float z, float yHint, float preferS = -1.0f) const;
     float wallLateral() const { return halfWidth + curbWidth + runoff; }

@@ -1131,6 +1131,32 @@ bool Track::load(const std::string& path) {
         return false;
     }
 
+    downhillSpawnX=spawnX; downhillSpawnY=spawnY; downhillSpawnZ=spawnZ; downhillSpawnYaw=spawnYaw;
+    startGate=0; finishGate=int(samples.size())-1; uphill=false;
+    if (!closed && touge) {
+        // Extend both ends so either direction has 100 m after its finish line.
+        constexpr int count=25;
+        constexpr float step=4.0f;
+        auto extension = [&](const TrackSample& endpoint, const TrackSample& neighbour, float distance) {
+            TrackSample v=endpoint;
+            float dx=endpoint.x-neighbour.x, dz=endpoint.z-neighbour.z;
+            float len=std::sqrt(dx*dx+dz*dz);
+            if (len > 0.001f) {
+                v.x += dx/len*distance; v.z += dz/len*distance;
+                v.y += clampf((endpoint.y-neighbour.y)/len, -0.12f, 0.12f)*distance;
+            }
+            v.nameId=-1; v.corner=0; v.bridge=false;
+            return v;
+        };
+        const TrackSample first=samples.front(), second=samples[1];
+        const TrackSample last=samples.back(), before=samples[samples.size()-2];
+        std::vector<TrackSample> extended; extended.reserve(samples.size()+2*count);
+        for(int i=count;i>0;--i) extended.push_back(extension(first,second,float(i)*step));
+        extended.insert(extended.end(),samples.begin(),samples.end());
+        for(int i=1;i<=count;++i) extended.push_back(extension(last,before,float(i)*step));
+        samples.swap(extended);
+        startGate=count; finishGate=int(samples.size())-count-1;
+    }
     length = 0;
     for (size_t i = 0; i < samples.size(); ++i) {
         samples[i].s = length;
@@ -1142,6 +1168,8 @@ bool Track::load(const std::string& path) {
         length += std::sqrt((b.x - a.x) * (b.x - a.x) + (b.z - a.z) * (b.z - a.z));
     }
 
+    raceStartS=samples[startGate].s;
+    raceFinishS=closed ? length : samples[finishGate].s;
     visual = CpuMesh{};
     addGround(visual, *this, touge ? Vec3{0.08f, 0.20f, 0.08f} : Vec3{0.12f, 0.27f, 0.11f});
     SampleGrid sampleGrid;
@@ -1181,10 +1209,34 @@ bool Track::load(const std::string& path) {
         addWalls(visual, *this);
     }
     addPit(visual, pit);
-    addStartLine(visual, *this, 0, 1);
+    addStartLine(visual, *this, startGate, startGate + 1);
     if (!closed) {
-        const int n = static_cast<int>(samples.size());
-        addStartLine(visual, *this, n - 1, n - 2);  // ゴールラインと門
+        addStartLine(visual, *this, finishGate, finishGate - 1);  // ゴールラインと門
+    }
+    return true;
+}
+
+bool Track::setUphill(bool enabled) {
+    if (closed || !touge) return !enabled;
+    if (enabled == uphill) return true;
+    std::reverse(samples.begin(), samples.end());
+    for (TrackSample& sample : samples) sample.cross = -sample.cross;
+    length=0;
+    for (size_t i=0; i<samples.size(); ++i) {
+        samples[i].s=length;
+        if (i+1<samples.size()) {
+            float dx=samples[i+1].x-samples[i].x, dz=samples[i+1].z-samples[i].z;
+            length+=std::sqrt(dx*dx+dz*dz);
+        }
+    }
+    raceStartS=samples[startGate].s; raceFinishS=samples[finishGate].s;
+    uphill=enabled;
+    if (uphill) {
+        const int i=std::min(startGate+2,finishGate-1);
+        const TrackSample& a=samples[i]; const TrackSample& b=samples[i+1];
+        spawnX=a.x; spawnY=a.y; spawnZ=a.z; spawnYaw=std::atan2(b.x-a.x,b.z-a.z);
+    } else {
+        spawnX=downhillSpawnX; spawnY=downhillSpawnY; spawnZ=downhillSpawnZ; spawnYaw=downhillSpawnYaw;
     }
     return true;
 }
