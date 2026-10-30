@@ -48,18 +48,20 @@ in vec3 vWorld;
 uniform vec3 uCamPos;
 uniform float uNight;
 uniform vec3 uLampLeft, uLampRight, uLampDir, uRearLight;
+uniform vec3 uRivalLeft, uRivalRight, uRivalDir, uRivalRear;
+uniform float uRivalOn, uRivalBrake;
 uniform float uBrakeOn, uReverseOn;
 uniform float uEmissive;
 out vec4 fragColor;
-float beam(vec3 position, vec3 lamp) {
+float beam(vec3 position, vec3 lamp, vec3 direction) {
     vec3 offset = position - lamp;
-    vec3 horizontal = normalize(vec3(uLampDir.x, 0.0, uLampDir.z));
+    vec3 horizontal = normalize(vec3(direction.x, 0.0, direction.z));
     float along = dot(offset.xz, horizontal.xz);
     float across = abs(offset.x * horizontal.z - offset.z * horizontal.x);
     float width = 2.5 + max(along, 0.0) * 0.75;
     float cone = 1.0 - smoothstep(width * 0.70, width, across);
     float range = smoothstep(0.2, 2.5, along) * (1.0 - smoothstep(40.0, 95.0, along));
-    float expectedY = lamp.y + along * (uLampDir.y - 0.025);
+    float expectedY = lamp.y + along * (direction.y - 0.025);
     float height = 1.0 - smoothstep(2.0, 7.0 + max(along, 0.0) * 0.10, abs(position.y - expectedY));
     return cone * range * height;
 }
@@ -70,7 +72,8 @@ void main() {
     float light = 0.36 + 0.64 * max(dot(n, sun), 0.0);
     vec3 color = vColor * light;
     if (uNight > 0.5) {
-        float lamps = max(beam(vWorld, uLampLeft), beam(vWorld, uLampRight));
+        float lamps = max(beam(vWorld, uLampLeft, uLampDir), beam(vWorld, uLampRight, uLampDir));
+        if (uRivalOn > 0.5) lamps = max(lamps, max(beam(vWorld, uRivalLeft, uRivalDir), beam(vWorld, uRivalRight, uRivalDir)));
         vec3 moon = vec3(0.12, 0.16, 0.24);
         color = vColor * (moon + vec3(1.45, 1.32, 1.05) * lamps);
     }
@@ -85,6 +88,13 @@ void main() {
         float vertical = 1.0 - smoothstep(1.5, 4.0, abs(offset.y));
         float intensity = vertical * mix(0.30, 1.0, uNight);
         color += vColor * intensity * (uBrakeOn * brakeReach * vec3(1.6, 0.035, 0.02) + uReverseOn * reverseReach * vec3(0.60, 0.58, 0.48));
+    }
+    if (uRivalOn > 0.5 && uRivalBrake > 0.5) {
+        vec3 offset = vWorld-uRivalRear;
+        float behind = -dot(offset.xz, normalize(uRivalDir.xz));
+        float reach=(1.0-smoothstep(0.5,4.0,length(offset.xz)))*smoothstep(-0.5,1.0,behind);
+        float vertical=1.0-smoothstep(1.5,4.0,abs(offset.y));
+        color += vColor*reach*vertical*mix(0.30,1.0,uNight)*vec3(1.6,0.035,0.02);
     }
     if (uEmissive > 0.5) color = vColor;
     float dist = distance(vWorld, uCamPos);
@@ -288,6 +298,12 @@ bool Renderer::init() {
     uRearLight = glGetUniformLocation(worldProgram, "uRearLight");
     uBrakeOn = glGetUniformLocation(worldProgram, "uBrakeOn");
     uReverseOn = glGetUniformLocation(worldProgram, "uReverseOn");
+    uRivalOn=glGetUniformLocation(worldProgram,"uRivalOn");
+    uRivalBrake=glGetUniformLocation(worldProgram,"uRivalBrake");
+    uRivalLeft=glGetUniformLocation(worldProgram,"uRivalLeft");
+    uRivalRight=glGetUniformLocation(worldProgram,"uRivalRight");
+    uRivalDir=glGetUniformLocation(worldProgram,"uRivalDir");
+    uRivalRear=glGetUniformLocation(worldProgram,"uRivalRear");
     uEmissive = glGetUniformLocation(worldProgram, "uEmissive");
     uSkyNight = glGetUniformLocation(skyProgram, "uNight");
     uOrtho = glGetUniformLocation(hudProgram, "uOrtho");
@@ -390,6 +406,14 @@ void Renderer::beginWorld(const Mat4& viewProj, Vec3 cameraPos, bool night, Vec3
     glUniform1f(uBrakeOn, braking ? 1.0f : 0.0f);
     glUniform1f(uReverseOn, reversing ? 1.0f : 0.0f);
     glUniform1f(uEmissive, 0.0f);
+    glUniform1f(uRivalOn, 0.0f);
+}
+
+void Renderer::setRivalLighting(bool enabled, bool braking, Vec3 left, Vec3 right, Vec3 direction, Vec3 rear) {
+    glUniform1f(uRivalOn,enabled?1.0f:0.0f);
+    glUniform1f(uRivalBrake,braking?1.0f:0.0f);
+    glUniform3f(uRivalLeft,left.x,left.y,left.z); glUniform3f(uRivalRight,right.x,right.y,right.z);
+    glUniform3f(uRivalDir,direction.x,direction.y,direction.z); glUniform3f(uRivalRear,rear.x,rear.y,rear.z);
 }
 
 void Renderer::draw(const GpuMesh& mesh, const Mat4& model) {

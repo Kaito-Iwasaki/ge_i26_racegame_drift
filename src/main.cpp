@@ -2,6 +2,7 @@
 #include "camera.hpp"
 #include "menu.hpp"
 #include "rival.hpp"
+#include "flare.hpp"
 #include "wheel_pose.hpp"
 #include "suspension_visual.hpp"
 #include "countdown.hpp"
@@ -109,6 +110,13 @@ struct App {
     Car car;
     Rival rival;
     SmokeSystem rivalSmoke;
+    SuspensionVisual rivalSuspension;
+    SkidMarks rivalSkids;
+    LightTrail rivalTrail;
+    float rivalWheelRoad[4] = {};
+    float rivalPitch=0, rivalRoll=0;
+    std::vector<float> flareVerts;
+    std::vector<unsigned> flareIndices;
     int battleResult = 0; // 0 ongoing, 1 player wins, -1 rival wins
     bool battle = false;
     int difficulty = 1;
@@ -392,7 +400,7 @@ void resetRace(App& app) {
     app.car.reset(app.track);
     if (app.battle && app.car.ground.found) {
         // Put the player and rival on separate sides of the same starting line.
-        const float lane=1.25f;
+        const float lane=1.60f;
         app.car.x += app.car.ground.rightX*lane;
         app.car.z += app.car.ground.rightZ*lane;
         app.car.ground=app.track.query(app.car.x,app.car.z,app.car.y,app.car.ground.s);
@@ -400,6 +408,9 @@ void resetRace(App& app) {
     }
     app.rival.reset(app.track,app.car.ground.s,app.difficulty);
     app.rivalSmoke.clear();
+    app.rivalSuspension.reset();
+    app.rivalSkids.clear();
+    app.rivalTrail.clear();
     app.battleResult=0;
     app.race = Race{};
     if (app.battle && app.track.closed) { app.race.timing=true; app.race.prevS=app.car.ground.s; }
@@ -416,27 +427,26 @@ void resetRace(App& app) {
 }
 
 // Project each rear tyre onto the nearest road surface, including camber.
-void recordTyreMarks(App& app, const DriveInput& input) {
-    const bool braking = brakeLightsActive(input, app.car.speed);
-    const bool sliding = app.car.drifting && std::fabs(app.car.slipAngle) > 0.12f;
-    const bool active = (braking || sliding) && app.car.groundSpeed() > 2.0f && app.car.ground.found;
+void recordTyreMarks(App& app, const Car& car, SkidMarks& marks, bool braking, float brakeInput) {
+    const bool sliding = car.drifting && std::fabs(car.slipAngle) > 0.12f;
+    const bool active = (braking || sliding) && car.groundSpeed() > 2.0f && car.ground.found;
     if (!active) {
-        for (int i=0;i<2;++i) app.skidMarks.sample(i, false, {}, 0);
+        for (int i=0;i<2;++i) marks.sample(i, false, {}, 0);
         return;
     }
-    const Vec3 fwd{std::sin(app.car.yaw),0,std::cos(app.car.yaw)};
+    const Vec3 fwd{std::sin(car.yaw),0,std::cos(car.yaw)};
     const Vec3 right{fwd.z,0,-fwd.x};
-    const float brakeStrength = input.handbrake ? 1.0f : (braking ? clampf(input.brake,0.0f,1.0f) : 0.0f);
-    const float driftStrength = sliding ? clampf((std::fabs(app.car.slipAngle) - 0.12f) / 0.45f, 0.15f, 1.0f) : 0.0f;
+    const float brakeStrength = braking ? clampf(brakeInput,0.0f,1.0f) : 0.0f;
+    const float driftStrength = sliding ? clampf((std::fabs(car.slipAngle) - 0.12f) / 0.45f, 0.15f, 1.0f) : 0.0f;
     const float strength = std::max(brakeStrength, driftStrength);
     for (int wheel=0; wheel<2; ++wheel) {
         const float side=wheel==0 ? -1.0f : 1.0f;
-        const Vec3 center=Vec3{app.car.x,app.car.y,app.car.z}-fwd*1.38f+right*(side*0.82f);
-        const TrackPose p=app.track.query(center.x,center.z,app.car.y,app.car.ground.s);
+        const Vec3 center=Vec3{car.x,car.y,car.z}-fwd*1.38f+right*(side*0.82f);
+        const TrackPose p=app.track.query(center.x,center.z,car.y,car.ground.s);
         const float across = right.x*p.rightX+right.z*p.rightZ;
         const float half=.14f;
         if (!p.found || std::fabs(p.lateral)+std::fabs(across)*half > app.track.halfWidth+0.15f) {
-            app.skidMarks.sample(wheel,false,{},0);
+            marks.sample(wheel,false,{},0);
             continue;
         }
         const float y=p.centerY+p.lateral*p.cross+0.035f;
@@ -444,7 +454,7 @@ void recordTyreMarks(App& app, const DriveInput& input) {
         SkidMarks::Edge edge{center-width,center+width};
         edge.left.y=y-p.cross*across*half;
         edge.right.y=y+p.cross*across*half;
-        app.skidMarks.sample(wheel,true,edge,strength);
+        marks.sample(wheel,true,edge,strength);
     }
 }
 
@@ -729,37 +739,66 @@ void drawHud(App& app) {
 }
 
 // Four road samples follow the vehicle yaw and use the current road layer at crossings.
-void sampleWheelRoad(const App& app, float road[4]) {
-    const float sn = std::sin(app.car.yaw), cs = std::cos(app.car.yaw);
+void sampleWheelRoad(const App& app, const Car& car, float road[4]) {
+    const float sn = std::sin(car.yaw), cs = std::cos(car.yaw);
     const float axleZ[2] = {1.42f, -1.38f};
-    const float preferS = app.car.ground.found ? app.car.ground.s : -1.0f;
+    const float preferS = car.ground.found ? car.ground.s : -1.0f;
     const float edge = app.track.halfWidth + app.track.curbWidth;
     for (int axle=0; axle<2; ++axle) for (int side=0; side<2; ++side) {
         const float x = (side == 0 ? -0.82f : 0.82f);
-        TrackPose p = app.track.query(app.car.x + cs*x + sn*axleZ[axle],
-                                      app.car.z - sn*x + cs*axleZ[axle], app.car.y, preferS);
-        road[axle*2+side] = p.found ? p.centerY + clampf(p.lateral,-edge,edge)*p.cross : app.car.y;
+        TrackPose p = app.track.query(car.x + cs*x + sn*axleZ[axle],
+                                      car.z - sn*x + cs*axleZ[axle], car.y, preferS);
+        road[axle*2+side] = p.found ? p.centerY + clampf(p.lateral,-edge,edge)*p.cross : car.y;
     }
 }
 
 void drawRival(App& app) {
     if (app.battle && !app.titleScreen) {
         const Car& rival=app.rival.car;
-        const float rp=(Rival::pose(app.track,app.rival.s+2).y-Rival::pose(app.track,app.rival.s-2).y)/4.0f;
-        const float rivalPitch=std::atan(rp), rivalRoll=std::atan(rival.ground.cross);
+        const float rivalPitch=app.rivalPitch, rivalRoll=app.rivalRoll;
         const Mat4 rivalModel=carModelMatrix(rival,rivalPitch,rivalRoll);
         app.renderer.draw(app.rivalBody,rivalModel);
         if (app.rival.braking) app.renderer.drawEmissive(app.brakeLights,rivalModel);
         if (app.night) app.renderer.drawEmissive(app.headlights,rivalModel);
-        const auto f=Rival::pose(app.track,app.rival.s+1.42f);
-        const auto b=Rival::pose(app.track,app.rival.s-1.38f);
-        float road[4]={f.y-.82f*f.cross,f.y+.82f*f.cross,b.y-.82f*b.cross,b.y+.82f*b.cross};
+
         for(int axle=0;axle<2;axle++)for(int side=0;side<2;side++) {
-            Mat4 wheel=roadWheelMatrix(rival.x,rival.z,rival.yaw,road,axle,side,
+            Mat4 wheel=roadWheelMatrix(rival.x,rival.z,rival.yaw,app.rivalWheelRoad,axle,side,
                                        axle==0?rival.steerInput*.50f:0.0f,rival.wheelSpin);
             app.renderer.draw(app.wheel,wheel);
         }
     }
+}
+
+void setRivalLighting(App& app) {
+    const Car& r=app.rival.car;
+    const float p=app.rivalPitch, roll=app.rivalRoll;
+    const Vec3 o=carPointWorld(r,p,roll,{0,0,0});
+    const Vec3 f=normalize(carPointWorld(r,p,roll,{0,0,1})-o);
+    app.renderer.setRivalLighting(app.battle && !app.titleScreen,app.rival.braking,
+        carPointWorld(r,p,roll,{-.52f,.60f,2.18f}),carPointWorld(r,p,roll,{.52f,.60f,2.18f}),
+        f,carPointWorld(r,p,roll,{0,.70f,-2.05f}));
+}
+
+void drawFlares(App& app,Vec3 camera,Vec3 look,Vec3 up,const Mat4& vp,float playerPitch,float playerRoll) {
+    app.flareVerts.clear();app.flareIndices.clear();
+    const Vec3 forward=normalize(look-camera), right=normalize(cross(forward,up)), viewUp=cross(right,forward);
+    auto vehicle=[&](const Car& c,float p,float r,bool headlights,bool brake) {
+        Vec3 origin=carPointWorld(c,p,r,{0,0,0});
+        Vec3 dir=normalize(carPointWorld(c,p,r,{0,0,1})-origin);
+        for(float side : {-1.0f,1.0f}) {
+            if(headlights) {
+                Vec3 point=carPointWorld(c,p,r,{side*.52f,.57f,2.22f});
+                if(length(camera-point)>1.2f) appendFlare(app.flareVerts,app.flareIndices,point,dir,camera,right,viewUp,{1,.90f,.62f},.9f,.6f);
+            }
+            if(brake) {
+                Vec3 point=carPointWorld(c,p,r,{side*.535f,.70f,-2.08f});
+                if(length(camera-point)>1.2f) appendFlare(app.flareVerts,app.flareIndices,point,dir*-1.0f,camera,right,viewUp,{1,.10f,.04f},.50f,.55f);
+            }
+        }
+    };
+    vehicle(app.car,playerPitch,playerRoll,app.night,app.braking);
+    if(app.battle && !app.titleScreen) vehicle(app.rival.car,app.rivalPitch,app.rivalRoll,app.night,app.rival.braking);
+    app.renderer.drawGlow(app.flareVerts.data(),int(app.flareVerts.size()/7),app.flareIndices.data(),int(app.flareIndices.size()),vp);
 }
 
 void frame(void* userdata) {
@@ -887,7 +926,8 @@ void frame(void* userdata) {
                 continue;
             }
             app.car.update(float(kFixedStepSec) * kDrivingPace, input, app.track);
-            recordTyreMarks(app, input);
+            recordTyreMarks(app,app.car,app.skidMarks,brakeLightsActive(input,app.car.speed),
+                            input.handbrake?1.0f:input.brake);
             // Emit on every physics step so brief collisions are not lost between frames.
             const float effectDt = float(kFixedStepSec);
             Vec3 carVel{app.car.velX, 0, app.car.velZ};
@@ -911,8 +951,10 @@ void frame(void* userdata) {
                 app.surfaceEffects.emitMud(rear - right * 0.82f, rear + right * 0.82f,
                                            carVel, app.car.groundSpeed(), effectDt);
             }
-            if (app.battle) app.rival.update(app.track, float(kFixedStepSec) * kDrivingPace,
-                                             app.car.ground.s, app.car.groundSpeed());
+            if (app.battle) {
+                app.rival.update(app.track, float(kFixedStepSec)*kDrivingPace, app.car.ground.s, app.car.groundSpeed());
+                recordTyreMarks(app,app.rival.car,app.rivalSkids,app.rival.braking,app.rival.braking?1.0f:0.0f);
+            }
             tickRace(app.race, app.car.ground.s, app.track.length, float(kFixedStepSec), app.track.closed,
                      app.track.raceStartS, app.track.raceFinishS);
             if (app.battle && app.battleResult==0) {
@@ -945,11 +987,18 @@ void frame(void* userdata) {
     app.braking = brakeLightsActive(input, app.car.speed);
     // The hood camera and vehicle mesh use the same pitch and roll.
     float wheelRoad[4];
-    sampleWheelRoad(app, wheelRoad);
+    sampleWheelRoad(app, app.car, wheelRoad);
     app.suspensionVisual.update(wheelRoad, (app.paused || app.titleScreen) ? 0.0f : float(elapsed));
     app.car.bodyHeave = app.suspensionVisual.heave(app.car.y);
     float pitch = app.suspensionVisual.pitch() + app.car.bodyPitch;
     float roll = app.suspensionVisual.roll() + app.car.bodyRoll;
+    if (app.battle && !app.titleScreen) {
+        sampleWheelRoad(app,app.rival.car,app.rivalWheelRoad);
+        app.rivalSuspension.update(app.rivalWheelRoad,app.paused?0.0f:float(elapsed));
+        app.rival.car.bodyHeave=app.rivalSuspension.heave(app.rival.car.y);
+        app.rivalPitch=app.rivalSuspension.pitch()+app.rival.car.bodyPitch;
+        app.rivalRoll=app.rivalSuspension.roll()+app.rival.car.bodyRoll;
+    }
     updateCamera(app, pitch, roll, (app.paused || app.titleScreen) ? 0.0f : float(elapsed));
 
     // ブレーキランプ点灯中は、左右ランプの位置を履歴に残して光の軌跡にする。
@@ -960,6 +1009,12 @@ void frame(void* userdata) {
             app.brakeTrail.record(lampL, lampR);
         }
         app.brakeTrail.update(float(elapsed));
+        if (app.battle && !app.titleScreen && app.rival.braking && app.rival.car.groundSpeed()>2.5f) {
+            const Car& r=app.rival.car;
+            app.rivalTrail.record(carPointWorld(r,app.rivalPitch,app.rivalRoll,{-.535f,.70f,-2.0f}),
+                                  carPointWorld(r,app.rivalPitch,app.rivalRoll,{ .535f,.70f,-2.0f}));
+        }
+        app.rivalTrail.update(float(elapsed));
     }
 
     // ドリフト中は後輪の接地点からタイヤ煙を出す。物理ステップとは独立に
@@ -987,6 +1042,7 @@ void frame(void* userdata) {
         app.rivalSmoke.update(float(elapsed));
         app.surfaceEffects.update(float(elapsed));
         app.skidMarks.update(float(elapsed));
+        app.rivalSkids.update(float(elapsed));
     }
 
     int drawableW = 0;
@@ -1008,13 +1064,19 @@ void frame(void* userdata) {
     const Vec3 rearLight = carPointWorld(app.car, pitch, roll, {0, 0.70f, -2.05f});
     const bool reversing = reverseLightsActive(app.car.speed, app.car.brakeHold);
     app.renderer.beginWorld(viewProj, app.camera.eye, app.night, lampLeft, lampRight, lampDirection, rearLight, app.braking, reversing);
+    setRivalLighting(app);
 
     app.renderer.drawCourse(app.course, viewProj);
     // Marks lie just above the road and use ordinary translucent blending.
     app.skidMarks.build(app.camera.eye, app.skidVerts, app.skidIndices);
     app.renderer.drawGlow(app.skidVerts.data(), int(app.skidVerts.size()/7),
                           app.skidIndices.data(), int(app.skidIndices.size()), viewProj, false);
+    if (app.battle) {
+        app.rivalSkids.build(app.camera.eye,app.skidVerts,app.skidIndices);
+        app.renderer.drawGlow(app.skidVerts.data(),int(app.skidVerts.size()/7),app.skidIndices.data(),int(app.skidIndices.size()),viewProj,false);
+    }
     app.renderer.beginWorld(viewProj, app.camera.eye, app.night, lampLeft, lampRight, lampDirection, rearLight, app.braking, reversing);
+    setRivalLighting(app);
     Mat4 shadow = mul(translation(app.car.x, app.car.y + 0.08f, app.car.z), rotationY(app.car.yaw));
     app.renderer.draw(app.shadow, shadow);
 
@@ -1068,7 +1130,12 @@ void frame(void* userdata) {
                               static_cast<int>(app.trailVerts.size() / 7),
                               app.trailIndices.data(), static_cast<int>(app.trailIndices.size()),
                               viewProj);
+        if (app.battle && !app.titleScreen) {
+            app.rivalTrail.buildQuads(app.trailVerts,app.trailIndices);
+            app.renderer.drawGlow(app.trailVerts.data(),int(app.trailVerts.size()/7),app.trailIndices.data(),int(app.trailIndices.size()),viewProj);
+        }
     }
+    if (!app.titleScreen) drawFlares(app,app.camera.eye,app.camera.look,app.camera.up,viewProj,pitch,roll);
     if (!app.titleScreen) {
         // Render a bounded, horizontally mirrored rear view after the main scene.
         const int mw=std::max(1,std::min(480,int(float(drawableW)*.36f)));
@@ -1083,8 +1150,10 @@ void frame(void* userdata) {
         app.renderer.beginMirror(mx,my,mw,mh);
         app.renderer.drawSky(app.night);
         app.renderer.beginWorld(mirrorVP,mirrorEye,app.night,lampLeft,lampRight,lampDirection,rearLight,app.braking,reversing);
+        setRivalLighting(app);
         app.renderer.drawCourse(app.course,mirrorVP);
         drawRival(app);
+        drawFlares(app,mirrorEye,rearPoint,mirrorUp,mirrorVP,pitch,roll);
         app.renderer.endMirror();
         Renderer& h=app.renderer; h.beginHud();
         const float x=float(mx), y=float(drawableH-my-mh), w=float(mw), hh=float(mh);

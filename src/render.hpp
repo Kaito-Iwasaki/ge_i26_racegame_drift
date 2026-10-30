@@ -26,6 +26,7 @@ struct Renderer {
     void endMirror();
     void beginWorld(const Mat4& viewProj, Vec3 cameraPos, bool night, Vec3 lampLeft, Vec3 lampRight, Vec3 lampDirection, Vec3 rearLight, bool braking, bool reversing);
     void drawEmissive(const GpuMesh& mesh, const Mat4& model);
+    void setRivalLighting(bool enabled, bool braking, Vec3 left, Vec3 right, Vec3 direction, Vec3 rear);
     void draw(const GpuMesh& mesh, const Mat4& model);
     void drawCourse(const GpuMesh& mesh, const Mat4& viewProj);
     // タイヤ煙などの半透明ビルボード用。頂点は [xyz, uv, alpha] の 6 float。
@@ -60,6 +61,7 @@ struct Renderer {
     int uModel = -1;
     int uCamPos = -1;
     int uNight = -1, uSkyNight = -1, uLampLeft = -1, uLampRight = -1, uLampDir = -1, uEmissive = -1, uRearLight = -1, uBrakeOn = -1, uReverseOn = -1;
+    int uRivalOn=-1,uRivalBrake=-1,uRivalLeft=-1,uRivalRight=-1,uRivalDir=-1,uRivalRear=-1;
     int uOrtho = -1;
     int uSmokeViewProj = -1;
     int uGlowViewProj = -1;
