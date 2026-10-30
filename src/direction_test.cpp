@@ -19,7 +19,7 @@ int main(int argc,char** argv) {
  assert(t.samples[t.startGate].y<t.samples[t.finishGate].y);
  auto rev=t.samples[t.samples.size()-1-(t.finishGate+10)];
  assert(std::fabs(t.length-oldLength)<.1f && t.raceStartS>99 && t.length-t.raceFinishS>99);
- p=t.query(t.spawnX,t.spawnZ,t.spawnY); assert(p.found && p.s>t.raceStartS && p.s<t.raceFinishS);
+ p=t.query(t.spawnX,t.spawnZ,t.spawnY); assert(p.found && p.s<t.raceStartS-19 && p.s>t.raceStartS-21);
  float dx=t.samples[t.startGate+3].x-t.samples[t.startGate+2].x,dz=t.samples[t.startGate+3].z-t.samples[t.startGate+2].z;
  assert(std::cos(t.spawnYaw)*dz+std::sin(t.spawnYaw)*dx>0);
  auto afterUp=t.samples[t.finishGate+10];p=t.query(afterUp.x,afterUp.z,afterUp.y,afterUp.s);assert(p.found && p.s>t.raceFinishS+35);

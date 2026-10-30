@@ -1232,7 +1232,7 @@ bool Track::setUphill(bool enabled) {
     raceStartS=samples[startGate].s; raceFinishS=samples[finishGate].s;
     uphill=enabled;
     if (uphill) {
-        const int i=std::min(startGate+2,finishGate-1);
+        const int i=std::max(0,startGate-5);
         const TrackSample& a=samples[i]; const TrackSample& b=samples[i+1];
         spawnX=a.x; spawnY=a.y; spawnZ=a.z; spawnYaw=std::atan2(b.x-a.x,b.z-a.z);
     } else {

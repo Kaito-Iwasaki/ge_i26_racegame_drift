@@ -1,6 +1,7 @@
 #include "car.hpp"
 #include "camera.hpp"
 #include "menu.hpp"
+#include "rival.hpp"
 #include "wheel_pose.hpp"
 #include "suspension_visual.hpp"
 #include "countdown.hpp"
@@ -106,8 +107,14 @@ struct App {
     EngineVoice engineVoice;
     Track track;
     Car car;
+    Rival rival;
+    SmokeSystem rivalSmoke;
+    int battleResult = 0; // 0 ongoing, 1 player wins, -1 rival wins
+    bool battle = false;
+    int difficulty = 1;
     GpuMesh course;
     GpuMesh body;
+    GpuMesh rivalBody;
     GpuMesh brakeLights;
     GpuMesh headlights;
     GpuMesh reverseLights;
@@ -137,7 +144,7 @@ struct App {
     bool uphill = false;
     bool titleScreen = true;
     bool showHelp = true;
-    int menuSelection = 4;
+    int menuSelection = 9;
     bool menuPadUp = false, menuPadDown = false, menuPadLeft = false, menuPadRight = false;
     bool menuPadConfirm = false;
     double accumulator = 0;
@@ -383,7 +390,11 @@ DriveInput readDrive(SDL_GameController* pad, PadPulse& pulse) {
 
 void resetRace(App& app) {
     app.car.reset(app.track);
+    app.rival.reset(app.track,app.car.ground.s,app.difficulty);
+    app.rivalSmoke.clear();
+    app.battleResult=0;
     app.race = Race{};
+    if (app.battle && app.track.closed) { app.race.timing=true; app.race.prevS=app.car.ground.s; }
     app.countdown.reset();
     app.suspensionVisual.reset();
     app.sound.resetBgm();
@@ -586,26 +597,23 @@ void drawTitle(App& app) {
     hud.addQuad(l,t,l+810*s,t+540*s,0.025f,0.04f,0.06f,0.96f);
     hud.addQuad(l,t,l+810*s,t+5*s,1,0.55f,0.18f,1);
     auto text=[&](float x,float y,float size,const char* label,float r,float g,float b){hud.drawText(l+x*s,t+y*s,size*s,label,r,g,b,1);};
-    text(44,35,5.0f,"RACE GAME DRIFT",1,.95f,.85f);
-    text(44,95,2.0f,"SELECT TIME AND DIRECTION",.95f,.59f,.25f);
-    text(44,145,2.4f,"CONTROLS",1,.95f,.85f);
-    text(44,185,1.8f,"KEYBOARD",.95f,.59f,.25f);
-    text(44,214,1.7f,"W / UP      ACCELERATE",.9f,.92f,.95f);
-    text(44,241,1.7f,"S / DOWN    BRAKE / REVERSE",.9f,.92f,.95f);
-    text(44,268,1.7f,"A D / ARROWS STEER",.9f,.92f,.95f);
-    text(44,295,1.7f,"SPACE       HANDBRAKE",.9f,.92f,.95f);
-    text(430,185,1.8f,"CONTROLLER",.95f,.59f,.25f);
-    text(430,214,1.7f,"RT / LT   ACCEL / BRAKE",.9f,.92f,.95f);
-    text(430,241,1.7f,"STICK     STEER",.9f,.92f,.95f);
-    text(430,268,1.7f,"A / RB    HANDBRAKE",.9f,.92f,.95f);
-    text(430,295,1.7f,"Y CAMERA  START PAUSE",.9f,.92f,.95f);
-    text(44,318,1.6f,"TIME OF DAY",.95f,.59f,.25f);
+    text(44,22,4.2f,"RACE GAME DRIFT",1,.95f,.85f);
+    text(44,72,1.6f,"KEYS: W/S GAS/BRAKE  A/D STEER  SPACE DRIFT",.9f,.92f,.95f);
+    text(44,96,1.6f,"PAD: RT/LT GAS/BRAKE  STICK STEER  A DRIFT",.9f,.92f,.95f);
+    text(44,120,1.6f,"C/Y CAMERA   P/START PAUSE",.75f,.8f,.85f);
+    text(44,211,1.5f,"TIME OF DAY",.95f,.59f,.25f);
     drawMenuButton(hud,m.title(0),"DAY",app.menuSelection==0,!app.night);
     drawMenuButton(hud,m.title(1),"NIGHT",app.menuSelection==1,app.night);
-    text(44,386,1.6f,"COURSE DIRECTION",.95f,.59f,.25f);
+    text(44,269,1.5f,"COURSE DIRECTION",.95f,.59f,.25f);
     drawMenuButton(hud,m.title(2),"DOWNHILL",app.menuSelection==2,!app.uphill);
-    drawMenuButton(hud,m.title(3),app.track.closed || !app.track.touge ? "UPHILL N/A" : "UPHILL",app.menuSelection==3,app.uphill);
-    drawMenuButton(hud,m.title(4),"START RACE",app.menuSelection==4,false);
+    drawMenuButton(hud,m.title(3),app.track.closed || !app.track.touge?"UPHILL N/A":"UPHILL",app.menuSelection==3,app.uphill);
+    text(44,327,1.5f,"GAME MODE",.95f,.59f,.25f);
+    drawMenuButton(hud,m.title(4),"TIME ATTACK",app.menuSelection==4,!app.battle);
+    drawMenuButton(hud,m.title(5),"BATTLE",app.menuSelection==5,app.battle);
+    text(44,385,1.5f,app.battle?"RIVAL DIFFICULTY":"RIVAL DIFFICULTY - BATTLE ONLY",.95f,.59f,.25f);
+    const char* levels[3]={"EASY","NORMAL","HARD"};
+    for(int i=0;i<3;i++)drawMenuButton(hud,m.title(i+6),levels[i],app.menuSelection==i+6,app.battle && app.difficulty==i);
+    drawMenuButton(hud,m.title(9),"START RACE",app.menuSelection==9,false);
     text(44,520,1.2f,"MOUSE / ARROWS / STICK   ENTER / A: SELECT",.7f,.77f,.82f);
     hud.flushHud();
 }
@@ -699,8 +707,14 @@ void drawHud(App& app) {
                      go ? 0.35f : 1.0f, go ? 1.0f : 0.83f, go ? 0.38f : 0.25f, 1.0f);
     }
 
-    if (app.race.finished) {
-        hud.drawText(float(hud.width) * 0.5f - 105, float(hud.height) * 0.45f, 5.0f, "FINISH", 1, 0.95f, 0.9f, 1);
+    if (app.battle) {
+        const float gap=app.car.ground.s-app.rival.car.ground.s;
+        std::snprintf(line,sizeof(line),"RIVAL %+.0f M",gap);
+        hud.drawText(float(hud.width)-225,82,1.8f,line,0.95f,0.85f,0.5f,1);
+        if (app.battleResult!=0) hud.drawText(float(hud.width)*.5f-100,float(hud.height)*.45f,4.0f,
+                                              app.battleResult>0?"YOU WIN":"YOU LOSE",1,.95f,.9f,1);
+    } else if (app.race.finished) {
+        hud.drawText(float(hud.width)*.5f-105,float(hud.height)*.45f,5.0f,"FINISH",1,.95f,.9f,1);
     }
     drawMinimap(app);
     hud.flushHud();
@@ -789,7 +803,7 @@ void frame(void* userdata) {
         activate=activate || padPulse.start;
         if(padPulse.pause && app.paused) togglePause=true;
         if(padPulse.pause && app.titleScreen) start=true;
-        app.menuSelection=menuMove(app.titleScreen,app.menuSelection,dx,dy,app.night,app.uphill);
+        app.menuSelection=menuMove(app.titleScreen,app.menuSelection,dx,dy,app.night,app.uphill,app.battle,app.difficulty);
     } else {
         if(padPulse.reset) reset=true;
         if(padPulse.pause) togglePause=true;
@@ -807,11 +821,14 @@ void frame(void* userdata) {
         else if(app.menuSelection==1) app.night=true;
         else if(app.menuSelection==2) app.uphill=false;
         else if(app.menuSelection==3) { if(!app.track.closed && app.track.touge) app.uphill=true; }
+        else if(app.menuSelection==4) app.battle=false;
+        else if(app.menuSelection==5) app.battle=true;
+        else if(app.menuSelection>=6 && app.menuSelection<=8) app.difficulty=app.menuSelection-6;
         else start=true;
     } else if (activate && app.paused) {
         if(app.menuSelection==0) app.paused=false;
         else if(app.menuSelection==1) { app.paused=false; reset=true; }
-        else { app.paused=false; app.titleScreen=true; app.menuSelection=4; reset=true; }
+        else { app.paused=false; app.titleScreen=true; app.menuSelection=9; reset=true; }
     }
     if (start && app.titleScreen) {
         app.track.setUphill(app.uphill);
@@ -866,8 +883,13 @@ void frame(void* userdata) {
                 app.surfaceEffects.emitMud(rear - right * 0.82f, rear + right * 0.82f,
                                            carVel, app.car.groundSpeed(), effectDt);
             }
+            if (app.battle) app.rival.update(app.track, float(kFixedStepSec) * kDrivingPace);
             tickRace(app.race, app.car.ground.s, app.track.length, float(kFixedStepSec), app.track.closed,
                      app.track.raceStartS, app.track.raceFinishS);
+            if (app.battle && app.battleResult==0) {
+                if (app.race.finished || (app.track.closed && app.race.completed>0)) app.battleResult=1;
+                else if (app.rival.finished) app.battleResult=-1;
+            }
             app.accumulator -= kFixedStepSec;
             ++guard;
         }
@@ -926,6 +948,14 @@ void frame(void* userdata) {
                            float(elapsed));
         }
         app.smoke.update(float(elapsed));
+        if (app.battle && !app.titleScreen && app.rival.car.drifting) {
+            const Car& r=app.rival.car;
+            Vec3 f{std::sin(r.yaw),0,std::cos(r.yaw)}, right{f.z,0,-f.x};
+            Vec3 base{r.x,r.y+0.12f,r.z}; base=base-f*1.38f;
+            app.rivalSmoke.emit(base-right*.82f,base+right*.82f,{r.velX,0,r.velZ},
+                                clampf(std::fabs(r.slipAngle)*1.6f,0,1),float(elapsed));
+        }
+        app.rivalSmoke.update(float(elapsed));
         app.surfaceEffects.update(float(elapsed));
         app.skidMarks.update(float(elapsed));
     }
@@ -975,6 +1005,23 @@ void frame(void* userdata) {
             app.renderer.draw(app.wheel, wheel);
         }
     }
+    if (app.battle && !app.titleScreen) {
+        const Car& rival=app.rival.car;
+        const float rp=(Rival::pose(app.track,app.rival.s+2).y-Rival::pose(app.track,app.rival.s-2).y)/4.0f;
+        const float rivalPitch=std::atan(rp), rivalRoll=std::atan(rival.ground.cross);
+        const Mat4 rivalModel=carModelMatrix(rival,rivalPitch,rivalRoll);
+        app.renderer.draw(app.rivalBody,rivalModel);
+        if (app.rival.braking) app.renderer.drawEmissive(app.brakeLights,rivalModel);
+        if (app.night) app.renderer.drawEmissive(app.headlights,rivalModel);
+        const auto f=Rival::pose(app.track,app.rival.s+1.42f);
+        const auto b=Rival::pose(app.track,app.rival.s-1.38f);
+        float road[4]={f.y-.82f*f.cross,f.y+.82f*f.cross,b.y-.82f*b.cross,b.y+.82f*b.cross};
+        for(int axle=0;axle<2;axle++)for(int side=0;side<2;side++) {
+            Mat4 wheel=roadWheelMatrix(rival.x,rival.z,rival.yaw,road,axle,side,
+                                       axle==0?rival.steerInput*.50f:0.0f,rival.wheelSpin);
+            app.renderer.draw(app.wheel,wheel);
+        }
+    }
     // タイヤ煙は半透明なので、不透明な車体の後にビルボードで重ねる。
     {
         Vec3 camFwd = normalize(app.camera.look - app.camera.eye);
@@ -983,8 +1030,12 @@ void frame(void* userdata) {
         app.smoke.buildQuads(camRight, camUp, app.smokeVerts, app.smokeIndices);
         app.renderer.drawSmoke(app.smokeVerts.data(),
                                static_cast<int>(app.smokeVerts.size() / 6),
-                               app.smokeIndices.data(), static_cast<int>(app.smokeIndices.size()),
-                               viewProj);
+                               app.smokeIndices.data(), static_cast<int>(app.smokeIndices.size()), viewProj);
+        if (app.battle && !app.titleScreen) {
+            app.rivalSmoke.buildQuads(camRight,camUp,app.smokeVerts,app.smokeIndices);
+            app.renderer.drawSmoke(app.smokeVerts.data(),static_cast<int>(app.smokeVerts.size()/6),
+                                   app.smokeIndices.data(),static_cast<int>(app.smokeIndices.size()),viewProj);
+        }
     }
     // Mud uses normal alpha blending; sparks use the existing additive glow shader.
     {
@@ -1183,6 +1234,13 @@ int main(int argc, char** argv) {
     buildCarWheel(wheel);
     buildCarShadow(shadow);
     app.body = app.renderer.upload(body);
+    CpuMesh rivalBody=body;
+    for(size_t i=0;i+8<rivalBody.vertices.size();i+=9) {
+        if(rivalBody.vertices[i+6]>.7f && rivalBody.vertices[i+7]>.7f && rivalBody.vertices[i+8]>.7f) {
+            rivalBody.vertices[i+6]*=.28f; rivalBody.vertices[i+7]*=.52f; rivalBody.vertices[i+8]*=.95f;
+        }
+    }
+    app.rivalBody=app.renderer.upload(rivalBody);
     app.brakeLights = app.renderer.upload(brakeLights);
     app.headlights = app.renderer.upload(headlights);
     app.reverseLights = app.renderer.upload(reverseLights);
