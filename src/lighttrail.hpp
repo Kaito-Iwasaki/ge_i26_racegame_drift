@@ -67,6 +67,9 @@ struct LightTrail {
     void buildQuads(std::vector<float>& verts, std::vector<unsigned>& indices) const {
         verts.clear();
         indices.clear();
+        appendQuads(verts,indices);
+    }
+    void appendQuads(std::vector<float>& verts, std::vector<unsigned>& indices) const {
         if (nodes.size() < 2) {
             return;
         }

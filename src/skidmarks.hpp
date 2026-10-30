@@ -1,5 +1,6 @@
 #pragma once
 #include "geom.hpp"
+#include "view_frustum.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <deque>
@@ -40,11 +41,21 @@ struct SkidMarks {
     }
     void build(Vec3 camera,std::vector<float>& vertices,std::vector<unsigned>& indices) const {
         vertices.clear();indices.clear();
+        append(camera,vertices,indices);
+    }
+    // The two cars can share an upload; a conservative sphere keeps edge marks.
+    void append(Vec3 camera,std::vector<float>& vertices,std::vector<unsigned>& indices,
+                const ViewFrustum* frustum=nullptr) const {
         const float radius2=250.f*250.f;
         for(const auto& s:segments) {
             const Vec3 mid=(s.a.left+s.a.right+s.b.left+s.b.right)*.25f;
             const float dx=mid.x-camera.x,dz=mid.z-camera.z;
             if(dx*dx+dz*dz>radius2 || std::fabs(mid.y-camera.y)>60.0f) continue;
+            if(frustum) {
+                float r2=0;
+                for(Vec3 p:{s.a.left,s.a.right,s.b.left,s.b.right}) {Vec3 d=p-mid;r2=std::max(r2,dot(d,d));}
+                if(!frustum->intersectsSphere(mid,std::sqrt(r2))) continue;
+            }
             const float alpha=(.40f+.28f*s.opacity)*clampf(float((double(kLife)-(elapsed-s.born))/8.0),0,1);
             const unsigned base=static_cast<unsigned>(vertices.size()/7);
             for(Vec3 p:{s.a.left,s.a.right,s.b.right,s.b.left})

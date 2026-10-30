@@ -1,6 +1,7 @@
 #pragma once
 
 #include "geom.hpp"
+#include "view_frustum.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -101,10 +102,17 @@ struct SmokeSystem {
                     std::vector<unsigned>& indices) const {
         verts.clear();
         indices.clear();
+        appendQuads(camRight,camUp,verts,indices);
+    }
+
+    // Append both cars' smoke to one buffer, omitting particles outside the view.
+    void appendQuads(Vec3 camRight,Vec3 camUp,std::vector<float>& verts,
+                     std::vector<unsigned>& indices,const ViewFrustum* frustum=nullptr) const {
         const float uvs[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
         for (const Particle& p : particles) {
             float half = sizeOf(p) * 0.5f;
             float alpha = alphaOf(p);
+            if (frustum && (alpha <= 0.0f || !frustum->intersectsSphere(p.pos,half*1.415f))) continue;
             Vec3 r = camRight * half;
             Vec3 u = camUp * half;
             Vec3 corners[4] = {p.pos - r - u, p.pos + r - u, p.pos + r + u, p.pos - r + u};

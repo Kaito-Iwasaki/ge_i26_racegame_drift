@@ -1067,7 +1067,7 @@ void frame(void* userdata) {
             float strength = clampf(std::fabs(app.car.slipAngle) * 1.6f, 0.0f, 1.0f) *
                              clampf(app.car.groundSpeed() / 20.0f, 0.25f, 1.0f);
             app.smoke.emit(base - right * 0.82f, base + right * 0.82f, carVel, strength,
-                           float(elapsed));
+                           float(elapsed), 0.80f, 160);
         }
         app.smoke.update(float(elapsed));
         if (app.battle && !app.titleScreen && rivalNear(app,200.0f) && app.rival.car.drifting) {
@@ -1075,7 +1075,7 @@ void frame(void* userdata) {
             Vec3 f{std::sin(r.yaw),0,std::cos(r.yaw)}, right{f.z,0,-f.x};
             Vec3 base{r.x,r.y+0.12f,r.z}; base=base-f*1.38f;
             app.rivalSmoke.emit(base-right*.82f,base+right*.82f,{r.velX,0,r.velZ},
-                                clampf(std::fabs(r.slipAngle)*1.6f,0,1),float(elapsed),0.60f,180);
+                                clampf(std::fabs(r.slipAngle)*1.6f,0,1),float(elapsed),0.45f,110);
         }
         app.rivalSmoke.update(float(elapsed));
         app.surfaceEffects.update(float(elapsed));
@@ -1096,6 +1096,7 @@ void frame(void* userdata) {
     Mat4 proj = perspective(fovDeg * 3.14159265f / 180.0f, aspect, 0.15f, 4000.0f);
     Mat4 view = lookAt(app.camera.eye, app.camera.look, app.camera.up);
     Mat4 viewProj = mul(proj, view);
+    const ViewFrustum effectView(viewProj);
     const Vec3 lampLeft = carPointWorld(app.car, pitch, roll, {-0.52f, 0.60f, 2.18f});
     const Vec3 lampRight = carPointWorld(app.car, pitch, roll, {0.52f, 0.60f, 2.18f});
     const Vec3 lampDirection = normalize(carPointWorld(app.car, pitch, roll, {0,0,1}) - carPointWorld(app.car, pitch, roll, {0,0,0}));
@@ -1106,13 +1107,11 @@ void frame(void* userdata) {
 
     app.renderer.drawCourse(app.course, viewProj);
     // Marks lie just above the road and use ordinary translucent blending.
-    app.skidMarks.build(app.camera.eye, app.skidVerts, app.skidIndices);
-    app.renderer.drawGlow(app.skidVerts.data(), int(app.skidVerts.size()/7),
-                          app.skidIndices.data(), int(app.skidIndices.size()), viewProj, false);
-    if (app.battle) {
-        app.rivalSkids.build(app.camera.eye,app.skidVerts,app.skidIndices);
-        app.renderer.drawGlow(app.skidVerts.data(),int(app.skidVerts.size()/7),app.skidIndices.data(),int(app.skidIndices.size()),viewProj,false);
-    }
+    app.skidVerts.clear();app.skidIndices.clear();
+    app.skidMarks.append(app.camera.eye,app.skidVerts,app.skidIndices,&effectView);
+    if (app.battle) app.rivalSkids.append(app.camera.eye,app.skidVerts,app.skidIndices,&effectView);
+    app.renderer.drawGlow(app.skidVerts.data(),int(app.skidVerts.size()/7),
+                          app.skidIndices.data(),int(app.skidIndices.size()),viewProj,false);
     app.renderer.beginWorld(viewProj, app.camera.eye, app.night, lampLeft, lampRight, lampDirection, rearLight, app.braking, reversing);
     setRivalLighting(app);
     Mat4 shadow = mul(translation(app.car.x, app.car.y + 0.08f, app.car.z), rotationY(app.car.yaw));
@@ -1140,15 +1139,12 @@ void frame(void* userdata) {
         Vec3 camFwd = normalize(app.camera.look - app.camera.eye);
         Vec3 camRight = normalize(cross(camFwd, app.camera.up));
         Vec3 camUp = cross(camRight, camFwd);
-        app.smoke.buildQuads(camRight, camUp, app.smokeVerts, app.smokeIndices);
-        app.renderer.drawSmoke(app.smokeVerts.data(),
-                               static_cast<int>(app.smokeVerts.size() / 6),
-                               app.smokeIndices.data(), static_cast<int>(app.smokeIndices.size()), viewProj);
-        if (app.battle && !app.titleScreen) {
-            app.rivalSmoke.buildQuads(camRight,camUp,app.smokeVerts,app.smokeIndices);
-            app.renderer.drawSmoke(app.smokeVerts.data(),static_cast<int>(app.smokeVerts.size()/6),
-                                   app.smokeIndices.data(),static_cast<int>(app.smokeIndices.size()),viewProj);
-        }
+        app.smokeVerts.clear();app.smokeIndices.clear();
+        app.smoke.appendQuads(camRight,camUp,app.smokeVerts,app.smokeIndices,&effectView);
+        if (app.battle && !app.titleScreen)
+            app.rivalSmoke.appendQuads(camRight,camUp,app.smokeVerts,app.smokeIndices,&effectView);
+        app.renderer.drawSmoke(app.smokeVerts.data(),int(app.smokeVerts.size()/6),
+                               app.smokeIndices.data(),int(app.smokeIndices.size()),viewProj);
     }
     // Mud uses normal alpha blending; sparks use the existing additive glow shader.
     {
@@ -1163,15 +1159,11 @@ void frame(void* userdata) {
     }
     // ブレーキランプの光の軌跡は加算グローで煙の後に重ねる。
     {
-        app.brakeTrail.buildQuads(app.trailVerts, app.trailIndices);
-        app.renderer.drawGlow(app.trailVerts.data(),
-                              static_cast<int>(app.trailVerts.size() / 7),
-                              app.trailIndices.data(), static_cast<int>(app.trailIndices.size()),
-                              viewProj);
-        if (app.battle && !app.titleScreen) {
-            app.rivalTrail.buildQuads(app.trailVerts,app.trailIndices);
-            app.renderer.drawGlow(app.trailVerts.data(),int(app.trailVerts.size()/7),app.trailIndices.data(),int(app.trailIndices.size()),viewProj);
-        }
+        app.trailVerts.clear();app.trailIndices.clear();
+        app.brakeTrail.appendQuads(app.trailVerts,app.trailIndices);
+        if (app.battle && !app.titleScreen) app.rivalTrail.appendQuads(app.trailVerts,app.trailIndices);
+        app.renderer.drawGlow(app.trailVerts.data(),int(app.trailVerts.size()/7),
+                              app.trailIndices.data(),int(app.trailIndices.size()),viewProj);
     }
     if (!app.titleScreen) drawFlares(app,app.camera.eye,app.camera.look,app.camera.up,viewProj,pitch,roll);
     if (!app.titleScreen) {
