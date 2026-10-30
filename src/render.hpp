@@ -22,6 +22,8 @@ struct Renderer {
     void resize(int width, int height);
     void clearFrame();
     void drawSky(bool night);
+    void beginMirror(int x, int y, int w, int h);
+    void endMirror();
     void beginWorld(const Mat4& viewProj, Vec3 cameraPos, bool night, Vec3 lampLeft, Vec3 lampRight, Vec3 lampDirection, Vec3 rearLight, bool braking, bool reversing);
     void drawEmissive(const GpuMesh& mesh, const Mat4& model);
     void draw(const GpuMesh& mesh, const Mat4& model);

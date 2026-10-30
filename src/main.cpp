@@ -390,6 +390,14 @@ DriveInput readDrive(SDL_GameController* pad, PadPulse& pulse) {
 
 void resetRace(App& app) {
     app.car.reset(app.track);
+    if (app.battle && app.car.ground.found) {
+        // Put the player and rival on separate sides of the same starting line.
+        const float lane=1.25f;
+        app.car.x += app.car.ground.rightX*lane;
+        app.car.z += app.car.ground.rightZ*lane;
+        app.car.ground=app.track.query(app.car.x,app.car.z,app.car.y,app.car.ground.s);
+        if (app.car.ground.found) app.car.y=app.car.ground.centerY+app.car.ground.lateral*app.car.ground.cross;
+    }
     app.rival.reset(app.track,app.car.ground.s,app.difficulty);
     app.rivalSmoke.clear();
     app.battleResult=0;
@@ -734,6 +742,26 @@ void sampleWheelRoad(const App& app, float road[4]) {
     }
 }
 
+void drawRival(App& app) {
+    if (app.battle && !app.titleScreen) {
+        const Car& rival=app.rival.car;
+        const float rp=(Rival::pose(app.track,app.rival.s+2).y-Rival::pose(app.track,app.rival.s-2).y)/4.0f;
+        const float rivalPitch=std::atan(rp), rivalRoll=std::atan(rival.ground.cross);
+        const Mat4 rivalModel=carModelMatrix(rival,rivalPitch,rivalRoll);
+        app.renderer.draw(app.rivalBody,rivalModel);
+        if (app.rival.braking) app.renderer.drawEmissive(app.brakeLights,rivalModel);
+        if (app.night) app.renderer.drawEmissive(app.headlights,rivalModel);
+        const auto f=Rival::pose(app.track,app.rival.s+1.42f);
+        const auto b=Rival::pose(app.track,app.rival.s-1.38f);
+        float road[4]={f.y-.82f*f.cross,f.y+.82f*f.cross,b.y-.82f*b.cross,b.y+.82f*b.cross};
+        for(int axle=0;axle<2;axle++)for(int side=0;side<2;side++) {
+            Mat4 wheel=roadWheelMatrix(rival.x,rival.z,rival.yaw,road,axle,side,
+                                       axle==0?rival.steerInput*.50f:0.0f,rival.wheelSpin);
+            app.renderer.draw(app.wheel,wheel);
+        }
+    }
+}
+
 void frame(void* userdata) {
     App& app = *static_cast<App*>(userdata);
     SDL_Event event;
@@ -883,7 +911,8 @@ void frame(void* userdata) {
                 app.surfaceEffects.emitMud(rear - right * 0.82f, rear + right * 0.82f,
                                            carVel, app.car.groundSpeed(), effectDt);
             }
-            if (app.battle) app.rival.update(app.track, float(kFixedStepSec) * kDrivingPace);
+            if (app.battle) app.rival.update(app.track, float(kFixedStepSec) * kDrivingPace,
+                                             app.car.ground.s, app.car.groundSpeed());
             tickRace(app.race, app.car.ground.s, app.track.length, float(kFixedStepSec), app.track.closed,
                      app.track.raceStartS, app.track.raceFinishS);
             if (app.battle && app.battleResult==0) {
@@ -1005,23 +1034,7 @@ void frame(void* userdata) {
             app.renderer.draw(app.wheel, wheel);
         }
     }
-    if (app.battle && !app.titleScreen) {
-        const Car& rival=app.rival.car;
-        const float rp=(Rival::pose(app.track,app.rival.s+2).y-Rival::pose(app.track,app.rival.s-2).y)/4.0f;
-        const float rivalPitch=std::atan(rp), rivalRoll=std::atan(rival.ground.cross);
-        const Mat4 rivalModel=carModelMatrix(rival,rivalPitch,rivalRoll);
-        app.renderer.draw(app.rivalBody,rivalModel);
-        if (app.rival.braking) app.renderer.drawEmissive(app.brakeLights,rivalModel);
-        if (app.night) app.renderer.drawEmissive(app.headlights,rivalModel);
-        const auto f=Rival::pose(app.track,app.rival.s+1.42f);
-        const auto b=Rival::pose(app.track,app.rival.s-1.38f);
-        float road[4]={f.y-.82f*f.cross,f.y+.82f*f.cross,b.y-.82f*b.cross,b.y+.82f*b.cross};
-        for(int axle=0;axle<2;axle++)for(int side=0;side<2;side++) {
-            Mat4 wheel=roadWheelMatrix(rival.x,rival.z,rival.yaw,road,axle,side,
-                                       axle==0?rival.steerInput*.50f:0.0f,rival.wheelSpin);
-            app.renderer.draw(app.wheel,wheel);
-        }
-    }
+    drawRival(app);
     // タイヤ煙は半透明なので、不透明な車体の後にビルボードで重ねる。
     {
         Vec3 camFwd = normalize(app.camera.look - app.camera.eye);
@@ -1055,6 +1068,31 @@ void frame(void* userdata) {
                               static_cast<int>(app.trailVerts.size() / 7),
                               app.trailIndices.data(), static_cast<int>(app.trailIndices.size()),
                               viewProj);
+    }
+    if (!app.titleScreen) {
+        // Render a bounded, horizontally mirrored rear view after the main scene.
+        const int mw=std::max(1,std::min(480,int(float(drawableW)*.36f)));
+        const int mh=std::max(1,std::min(120,int(float(drawableH)*.15f)));
+        const int mx=(drawableW-mw)/2, top=12, my=std::max(0,drawableH-top-mh);
+        const Vec3 mirrorEye=carPointWorld(app.car,pitch,roll,{0,1.35f,-2.38f});
+        const Vec3 rearPoint=carPointWorld(app.car,pitch,roll,{0,1.35f,-22.38f});
+        const Vec3 mirrorUp=normalize(carPointWorld(app.car,pitch,roll,{0,2.35f,-2.38f})-mirrorEye);
+        Mat4 mirrorProj=perspective(68.0f*3.14159265f/180.0f,float(mw)/float(mh),.15f,4000.0f);
+        mirrorProj.m[0]*=-1.0f;
+        const Mat4 mirrorVP=mul(mirrorProj,lookAt(mirrorEye,rearPoint,mirrorUp));
+        app.renderer.beginMirror(mx,my,mw,mh);
+        app.renderer.drawSky(app.night);
+        app.renderer.beginWorld(mirrorVP,mirrorEye,app.night,lampLeft,lampRight,lampDirection,rearLight,app.braking,reversing);
+        app.renderer.drawCourse(app.course,mirrorVP);
+        drawRival(app);
+        app.renderer.endMirror();
+        Renderer& h=app.renderer; h.beginHud();
+        const float x=float(mx), y=float(drawableH-my-mh), w=float(mw), hh=float(mh);
+        h.addQuad(x-3,y-3,x+w+3,y,.16f,.18f,.20f,1);
+        h.addQuad(x-3,y+hh,x+w+3,y+hh+3,.16f,.18f,.20f,1);
+        h.addQuad(x-3,y,x,y+hh,.16f,.18f,.20f,1);
+        h.addQuad(x+w,y,x+w+3,y+hh,.16f,.18f,.20f,1);
+        h.flushHud();
     }
     if (app.titleScreen) drawTitle(app);
     else { drawHud(app); if (app.paused) drawPauseMenu(app); }

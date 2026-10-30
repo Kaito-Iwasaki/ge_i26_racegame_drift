@@ -351,6 +351,20 @@ void Renderer::resize(int newWidth, int newHeight) {
     glViewport(0, 0, width, height);
 }
 
+void Renderer::beginMirror(int x, int y, int w, int h) {
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(x,y,w,h);
+    glViewport(x,y,w,h);
+    glClear(GL_DEPTH_BUFFER_BIT);
+    // Mirror projection reverses winding; keep the same visible face lighting.
+    glFrontFace(GL_CCW);
+}
+void Renderer::endMirror() {
+    glFrontFace(GL_CW);
+    glDisable(GL_SCISSOR_TEST);
+    glViewport(0,0,width,height);
+}
+
 void Renderer::drawSky(bool night) {
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_FALSE);
