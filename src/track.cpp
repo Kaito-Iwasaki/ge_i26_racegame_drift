@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <functional>
+#include <numeric>
+#include <limits>
 #include <sstream>
 
 namespace {
@@ -1170,6 +1173,7 @@ bool Track::load(const std::string& path) {
 
     raceStartS=samples[startGate].s;
     raceFinishS=closed ? length : samples[finishGate].s;
+    rebuildQueryIndex();
     visual = CpuMesh{};
     addGround(visual, *this, touge ? Vec3{0.08f, 0.20f, 0.08f} : Vec3{0.12f, 0.27f, 0.11f});
     SampleGrid sampleGrid;
@@ -1231,6 +1235,7 @@ bool Track::setUphill(bool enabled) {
     }
     raceStartS=samples[startGate].s; raceFinishS=samples[finishGate].s;
     uphill=enabled;
+    rebuildQueryIndex();
     if (uphill) {
         const int i=std::max(0,startGate-5);
         const TrackSample& a=samples[i]; const TrackSample& b=samples[i+1];
@@ -1241,59 +1246,65 @@ bool Track::setUphill(bool enabled) {
     return true;
 }
 
-TrackPose Track::query(float x, float z, float yHint, float preferS) const {
-    TrackPose best;
-    float bestScore = 1.0e30f;
-    const int segs = segmentCount(*this);
-    for (int i = 0; i < segs; ++i) {
-        const TrackSample& a = samples[i];
-        const TrackSample& b = samples[nextIndex(*this, i)];
-        float abx = b.x - a.x;
-        float abz = b.z - a.z;
-        float len2 = abx * abx + abz * abz;
-        if (len2 < 1e-4f) {
-            continue;
+void Track::rebuildQueryIndex() {
+    queryNodes.clear(); querySegments.clear(); queryLengths.clear();
+    const int count=segmentCount(*this);
+    if(count<=0)return;
+    querySegments.resize(count);std::iota(querySegments.begin(),querySegments.end(),0);
+    queryLengths.resize(count);
+    for(int i=0;i<count;++i){const auto& a=samples[i];const auto& b=samples[nextIndex(*this,i)];
+        queryLengths[i]=std::hypot(b.x-a.x,b.z-a.z);}
+    std::function<int(int,int)> build=[&](int begin,int end) {
+        const float inf=std::numeric_limits<float>::infinity();
+        QueryNode n{inf,-inf,inf,-inf,inf,-inf};
+        for(int j=begin;j<end;++j){int i=querySegments[j];const auto& a=samples[i];const auto& b=samples[nextIndex(*this,i)];
+            n.minX=std::min(n.minX,std::min(a.x,b.x));n.maxX=std::max(n.maxX,std::max(a.x,b.x));
+            n.minY=std::min(n.minY,std::min(a.y,b.y));n.maxY=std::max(n.maxY,std::max(a.y,b.y));
+            n.minZ=std::min(n.minZ,std::min(a.z,b.z));n.maxZ=std::max(n.maxZ,std::max(a.z,b.z));}
+        int id=int(queryNodes.size());queryNodes.push_back(n);
+        if(end-begin<=8){queryNodes[id].begin=begin;queryNodes[id].count=end-begin;return id;}
+        const bool splitX=n.maxX-n.minX >= n.maxZ-n.minZ;int mid=begin+(end-begin)/2;
+        std::nth_element(querySegments.begin()+begin,querySegments.begin()+mid,querySegments.begin()+end,
+          [&](int i,int j){const auto& a=samples[i];const auto& b=samples[nextIndex(*this,i)];const auto& c=samples[j];const auto& d=samples[nextIndex(*this,j)];
+            return splitX ? a.x+b.x<c.x+d.x : a.z+b.z<c.z+d.z;});
+        int l=build(begin,mid),r=build(mid,end);queryNodes[id].left=l;queryNodes[id].right=r;return id;
+    };
+    build(0,count);
+}
+
+TrackPose Track::query(float x,float z,float yHint,float preferS) const {
+    TrackPose best;float bestScore=1.0e30f;int bestIndex=std::numeric_limits<int>::max();
+    auto evaluate=[&](int i) {
+        const TrackSample& a=samples[i];const TrackSample& b=samples[nextIndex(*this,i)];
+        float abx=b.x-a.x,abz=b.z-a.z,len2=abx*abx+abz*abz;
+        if(len2<1e-4f)return;
+        float t=clampf(((x-a.x)*abx+(z-a.z)*abz)/len2,0.0f,1.0f);
+        float cx=a.x+abx*t,cz=a.z+abz*t,cy=a.y+(b.y-a.y)*t;
+        float dx=x-cx,dz=z-cz,dy=yHint-cy;
+        float score=dx*dx+dz*dz+dy*dy*12.0f;
+        const float len=queryLengths.size()==size_t(segmentCount(*this))?queryLengths[i]:std::sqrt(len2);
+        if(preferS>=0.0f && length>1.0f){float along=a.s+len*t;float ds=std::fabs(along-preferS);
+            if(closed && ds>length*.5f)ds=length-ds;score+=ds*.2f;}
+        if(score>bestScore || (score==bestScore && i>=bestIndex))return;
+        bestScore=score;bestIndex=i;float tx=abx/len,tz=abz/len;
+        best.found=true;best.s=a.s+len*t;if(closed && best.s>=length)best.s-=length;
+        best.rightX=tz;best.rightZ=-tx;best.lateral=dx*tz-dz*tx;best.centerY=cy;
+        best.cross=a.cross+(b.cross-a.cross)*t;best.yaw=std::atan2(tx,tz);
+        best.xzDist=std::sqrt(dx*dx+dz*dz);best.corner=t<.5f?a.corner:b.corner;best.nameId=t<.5f?a.nameId:b.nameId;
+    };
+    auto bound=[&](const QueryNode& n){float dx=std::max({n.minX-x,0.0f,x-n.maxX});
+        float dz=std::max({n.minZ-z,0.0f,z-n.maxZ});float dy=std::max({n.minY-yHint,0.0f,yHint-n.maxY});
+        return dx*dx+dz*dz+dy*dy*12.0f;};
+    if(queryNodes.empty() || querySegments.size()!=size_t(segmentCount(*this)) || (closed && preferS>length)) {
+        for(int i=0;i<segmentCount(*this);++i)evaluate(i);
+    } else {
+        int stack[128],top=0;stack[top++]=0;
+        while(top){int id=stack[--top];const QueryNode& node=queryNodes[id];if(bound(node)>bestScore)continue;
+            if(node.count>0){for(int j=0;j<node.count;++j)evaluate(querySegments[node.begin+j]);}
+            else {float left=bound(queryNodes[node.left]),right=bound(queryNodes[node.right]);
+                if(left<right){if(right<=bestScore)stack[top++]=node.right;if(left<=bestScore)stack[top++]=node.left;}
+                else {if(left<=bestScore)stack[top++]=node.left;if(right<=bestScore)stack[top++]=node.right;}}
         }
-        float t = ((x - a.x) * abx + (z - a.z) * abz) / len2;
-        t = clampf(t, 0.0f, 1.0f);
-        float cx = a.x + abx * t;
-        float cz = a.z + abz * t;
-        float cy = a.y + (b.y - a.y) * t;
-        float dx = x - cx;
-        float dz = z - cz;
-        float dy = yHint - cy;
-        // 立体交差では平面距離より高さを優先する。6m 差なら、壁際にいても下の路面へ落ちない。
-        float score = dx * dx + dz * dz + dy * dy * 12.0f;
-        if (preferS >= 0.0f && length > 1.0f) {
-            float along = a.s + std::sqrt(len2) * t;
-            float ds = std::fabs(along - preferS);
-            if (closed && ds > length * 0.5f) {
-                ds = length - ds;
-            }
-            // 今走っている周回位置から遠い路面は、交差の真下でも選ばない。
-            score += ds * 0.2f;
-        }
-        if (score >= bestScore) {
-            continue;
-        }
-        bestScore = score;
-        float invLen = 1.0f / std::sqrt(len2);
-        float tx = abx * invLen;
-        float tz = abz * invLen;
-        best.found = true;
-        best.s = a.s + std::sqrt(len2) * t;
-        if (closed && best.s >= length) {
-            best.s -= length;
-        }
-        best.rightX = tz;
-        best.rightZ = -tx;
-        best.lateral = dx * best.rightX + dz * best.rightZ;
-        best.centerY = cy;
-        best.cross = a.cross + (b.cross - a.cross) * t;
-        best.yaw = std::atan2(tx, tz);
-        best.xzDist = std::sqrt(dx * dx + dz * dz);
-        best.corner = t < 0.5f ? a.corner : b.corner;
-        best.nameId = t < 0.5f ? a.nameId : b.nameId;
     }
     return best;
 }

@@ -55,6 +55,11 @@ struct Track {
     std::vector<TrackSample> samples;
     std::vector<std::string> names;
     CpuMesh visual;
+    struct QueryNode { float minX,maxX,minY,maxY,minZ,maxZ; int left=-1,right=-1,begin=0,count=0; };
+    std::vector<QueryNode> queryNodes;
+    std::vector<int> querySegments;
+    std::vector<float> queryLengths;
+    void rebuildQueryIndex();
 
     bool load(const std::string& path);
     bool setUphill(bool enabled);
