@@ -79,10 +79,12 @@ void main() {
         vec2 fwd = normalize(uLampDir.xz);
         float behind = -dot(offset.xz, fwd);
         float spread = length(offset.xz);
-        float reach = (1.0 - smoothstep(1.0, 8.0, spread)) * smoothstep(-0.5, 1.0, behind);
+        float behindFade = smoothstep(-0.5, 1.0, behind);
+        float brakeReach = (1.0 - smoothstep(0.5, 4.0, spread)) * behindFade;
+        float reverseReach = (1.0 - smoothstep(1.0, 8.0, spread)) * behindFade;
         float vertical = 1.0 - smoothstep(1.5, 4.0, abs(offset.y));
-        float intensity = reach * vertical * mix(0.30, 1.0, uNight);
-        color += vColor * intensity * (uBrakeOn * vec3(1.6, 0.035, 0.02) + uReverseOn * vec3(0.60, 0.58, 0.48));
+        float intensity = vertical * mix(0.30, 1.0, uNight);
+        color += vColor * intensity * (uBrakeOn * brakeReach * vec3(1.6, 0.035, 0.02) + uReverseOn * reverseReach * vec3(0.60, 0.58, 0.48));
     }
     if (uEmissive > 0.5) color = vColor;
     float dist = distance(vWorld, uCamPos);

@@ -116,7 +116,9 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
     const float moving = clampf(mag / 5.0f, 0.0f, 1.0f);
     const float steeringSlip = (0.65f * release + (input.handbrake ? 0.15f : 0.10f * brakeSlide)) * steerInput * moving;
     const bool counter = steerInput * slip > 0;
-    const float maintainedSlip = -slip * (1.08f - (counter ? 0.78f * std::fabs(steerInput) : 0.0f));
+    // Ease out of a slide when steering is released or counter-steered.
+    const float neutralRecovery = 0.08f * (1.0f - std::fabs(steerInput));
+    const float maintainedSlip = -slip * (1.08f - neutralRecovery - (counter ? 0.82f * std::fabs(steerInput) : 0.0f));
     const float holding = slideHold * (counter ? 1.0f : 1.0f - std::fabs(steerInput));
     const float desiredSlip = steeringSlip * (1.0f - holding) + maintainedSlip * holding;
     // Releasing or countersteering reduces how hard the slide pulls the path inward.
