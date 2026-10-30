@@ -330,6 +330,18 @@ void Renderer::draw(const GpuMesh& mesh, const Mat4& model) {
     glDrawElements(GL_TRIANGLES, mesh.indexCount, GL_UNSIGNED_INT, nullptr);
 }
 
+void Renderer::drawCourse(const GpuMesh& mesh, const Mat4& viewProj) {
+    if (mesh.indexCount <= 0) return;
+    glBindVertexArray(mesh.vao);
+    Mat4 identity;
+    glUniformMatrix4fv(uModel, 1, GL_FALSE, identity.m);
+    for (const CourseChunk& chunk : mesh.chunks) {
+        if (!courseChunkVisible(chunk, viewProj)) continue;
+        glDrawElements(GL_TRIANGLES, chunk.count, GL_UNSIGNED_INT,
+                       reinterpret_cast<const void*>(size_t(chunk.first) * sizeof(std::uint32_t)));
+    }
+}
+
 void Renderer::drawSmoke(const float* verts, int vertCount, const unsigned* indices,
                          int indexCount, const Mat4& viewProj) {
     if (indexCount <= 0 || vertCount <= 0 || !smokeProgram) {
@@ -467,7 +479,7 @@ void Renderer::flushHud() {
     glEnable(GL_DEPTH_TEST);
 }
 
-GpuMesh Renderer::upload(const CpuMesh& mesh) {
+GpuMesh Renderer::upload(const CpuMesh& mesh, bool chunked) {
     GpuMesh gpu;
     if (mesh.indices.empty()) {
         return gpu;
@@ -479,7 +491,11 @@ GpuMesh Renderer::upload(const CpuMesh& mesh) {
     glBindBuffer(GL_ARRAY_BUFFER, gpu.vbo);
     glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(mesh.vertices.size() * sizeof(float)), mesh.vertices.data(), GL_STATIC_DRAW);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gpu.ibo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(mesh.indices.size() * sizeof(std::uint32_t)), mesh.indices.data(), GL_STATIC_DRAW);
+    ChunkedCourse course;
+    if (chunked) course = chunkCourse(mesh);
+    const auto& indices = chunked ? course.indices : mesh.indices;
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(indices.size() * sizeof(std::uint32_t)), indices.data(), GL_STATIC_DRAW);
+    gpu.chunks = std::move(course.chunks);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), reinterpret_cast<void*>(0));
     glEnableVertexAttribArray(1);

@@ -18,13 +18,15 @@ int main(){
             assert(std::fabs(wrapPi(std::atan2(flipped.look.x-flipped.eye.x,flipped.look.z-flipped.eye.z)-original))<.0001f);
         }
         auto hood=carCameraPose(car,kHoodCameraMode,.12f,-.08f);
-        Vec3 expected=carPointWorld(car,.12f,-.08f,{0,1.28f,.72f});
+        Vec3 expected=carPointWorld(car,.12f,-.08f,{0,1.28f,2.50f});
         assert(length(hood.eye-expected)<.0001f);
-        Vec3 dir=normalize(hood.look-hood.eye), horizontal=normalize(cross(hood.up,dir)), vertical=normalize(cross(dir,horizontal));
-        Vec3 bonnet=carPointWorld(car,.12f,-.08f,{0,.66f,1.9f})-hood.eye;
-        assert(dot(bonnet,dir)>.15f);
-        assert(std::fabs(dot(bonnet,vertical)/dot(bonnet,dir)) < std::tan(62.f*3.14159265f/360.f));
+        Vec3 dir=normalize(hood.look-hood.eye);
+        CpuMesh body; buildCarBody(body);
+        for(size_t i=0; i<body.vertices.size(); i+=9) {
+            Vec3 point=carPointWorld(car,.12f,-.08f,{body.vertices[i],body.vertices[i+1],body.vertices[i+2]})-hood.eye;
+            assert(dot(point,dir)<0.0f);
+        }
     }
     assert(kCameraModeCount==4);
-    std::puts("PASS: chase rigid behind yaw through wrap and slip; hood mount, orientation and bonnet field of view");
+    std::puts("PASS: chase rigid behind yaw through wrap and slip; front camera mount and body outside view");
 }

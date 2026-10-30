@@ -126,6 +126,7 @@ struct App {
     std::vector<unsigned> trailIndices;
     bool running = true;
     bool paused = false;
+    bool titleScreen = true;
     bool showHelp = true;
     double accumulator = 0;
     Uint64 prevCounter = 0;
@@ -214,6 +215,7 @@ struct PadPulse {
     bool reset = false;
     bool pause = false;
     bool camera = false;
+    bool start = false;
 };
 
 float stickDead(float value) {
@@ -245,11 +247,13 @@ PadPulse readBrowserPad(DriveInput& input) {
     static bool prevCamera = false;
     static bool prevReset = false;
     static bool prevPause = false;
+    static bool prevStart = false;
     bool camera = false;
     bool reset = false;
     bool pause = false;
+    bool start = false;
     if (emscripten_sample_gamepad_data() != EMSCRIPTEN_RESULT_SUCCESS) {
-        prevCamera = prevReset = prevPause = false;
+        prevCamera = prevReset = prevPause = prevStart = false;
         return pulse;
     }
     const int count = emscripten_get_num_gamepads();
@@ -284,6 +288,7 @@ PadPulse readBrowserPad(DriveInput& input) {
             camera = camera || held(3);
             reset = reset || held(8);
             pause = pause || held(9);
+            start = start || held(0);
             // A(0) または RB(5) がサイドブレーキ
             input.handbrake = input.handbrake || held(0) || held(5);
         } else if (pad.numAxes >= 6) {
@@ -291,6 +296,8 @@ PadPulse readBrowserPad(DriveInput& input) {
             input.brake = std::max(input.brake, triggerLevel(axis(4)));
         }
     }
+    pulse.start = start && !prevStart;
+    prevStart = start;
     pulse.camera = camera && !prevCamera;
     pulse.reset = reset && !prevReset;
     pulse.pause = pause && !prevPause;
@@ -333,6 +340,7 @@ DriveInput readDrive(SDL_GameController* pad, PadPulse& pulse) {
     // SDL はブラウザのパッドをゲームコントローラと認識しないことが多い。
     // 標準マッピングを Gamepad API から直接読む。
     PadPulse browser = readBrowserPad(input);
+    pulse.start = pulse.start || browser.start;
     pulse.camera = pulse.camera || browser.camera;
     pulse.reset = pulse.reset || browser.reset;
     pulse.pause = pulse.pause || browser.pause;
@@ -531,6 +539,40 @@ void drawMinimap(App& app) {
     }
 }
 
+void drawTitle(App& app) {
+    Renderer& hud = app.renderer;
+    hud.beginHud();
+    const float w = float(hud.width), h = float(hud.height);
+    const float scale = std::min(w / 900.0f, h / 600.0f);
+    const float left = w * 0.5f - 405.0f * scale;
+    const float top = h * 0.5f - 270.0f * scale;
+    hud.addQuad(0, 0, w, h, 0.01f, 0.02f, 0.04f, 0.78f);
+    hud.addQuad(left, top, left + 810 * scale, top + 540 * scale, 0.025f, 0.04f, 0.06f, 0.94f);
+    hud.addQuad(left, top, left + 810 * scale, top + 5 * scale, 1.0f, 0.55f, 0.18f, 1);
+    auto text = [&](float x, float y, float size, const char* value, float r, float g, float b) {
+        hud.drawText(left + x * scale, top + y * scale, size * scale, value, r, g, b, 1);
+    };
+    text(44, 35, 5.5f, "RACE GAME DRIFT", 1, 0.95f, 0.85f);
+    text(44, 95, 2.2f, "GET READY FOR THE DOWNHILL", 0.95f, 0.59f, 0.25f);
+    text(44, 150, 2.8f, "HOW TO PLAY", 1, 0.95f, 0.85f);
+    text(44, 192, 2.0f, "KEYBOARD", 0.95f, 0.59f, 0.25f);
+    text(44, 220, 1.8f, "W / UP       ACCELERATE", 0.9f, 0.92f, 0.95f);
+    text(44, 247, 1.8f, "S / DOWN     BRAKE / REVERSE", 0.9f, 0.92f, 0.95f);
+    text(44, 274, 1.8f, "A D / LEFT RIGHT  STEER", 0.9f, 0.92f, 0.95f);
+    text(44, 301, 1.8f, "SPACE        HANDBRAKE / DRIFT", 0.9f, 0.92f, 0.95f);
+    text(430, 192, 2.0f, "CONTROLLER", 0.95f, 0.59f, 0.25f);
+    text(430, 220, 1.8f, "RT / LT   ACCEL / BRAKE", 0.9f, 0.92f, 0.95f);
+    text(430, 247, 1.8f, "STICK     STEER", 0.9f, 0.92f, 0.95f);
+    text(430, 274, 1.8f, "A / RB    HANDBRAKE", 0.9f, 0.92f, 0.95f);
+    text(430, 301, 1.8f, "Y         CAMERA", 0.9f, 0.92f, 0.95f);
+    text(44, 355, 1.8f, "C CAMERA   R RESET   P PAUSE   H HELP", 0.7f, 0.77f, 0.82f);
+    text(44, 382, 1.8f, "PAD: Y CAMERA   BACK RESET   START PAUSE", 0.7f, 0.77f, 0.82f);
+    hud.addQuad(left + 44*scale, top + 436*scale, left + 766*scale, top + 498*scale,
+                0.95f, 0.48f, 0.12f, 1);
+    text(102, 455, 2.5f, "PRESS ENTER / A / START TO BEGIN", 0.04f, 0.05f, 0.06f);
+    hud.flushHud();
+}
+
 void drawHud(App& app) {
     Renderer& hud = app.renderer;
     hud.beginHud();
@@ -635,12 +677,14 @@ void frame(void* userdata) {
     App& app = *static_cast<App*>(userdata);
     SDL_Event event;
     bool reset = false;
+    bool start = false;
     while (SDL_PollEvent(&event)) {
         if (event.type == SDL_QUIT) {
             app.running = false;
         } else if (event.type == SDL_KEYDOWN && !event.key.repeat) {
             SDL_Scancode code = event.key.keysym.scancode;
             if (code == SDL_SCANCODE_ESCAPE) app.running = false;
+            else if (app.titleScreen) { if (code == SDL_SCANCODE_RETURN || code == SDL_SCANCODE_KP_ENTER) start = true; }
             else if (code == SDL_SCANCODE_R) reset = true;
             else if (code == SDL_SCANCODE_C) app.camera.mode = (app.camera.mode + 1) % kCameraModeCount;
             else if (code == SDL_SCANCODE_P) app.paused = !app.paused;
@@ -652,16 +696,27 @@ void frame(void* userdata) {
             SDL_GameControllerClose(app.pad);
             app.pad = nullptr;
         } else if (event.type == SDL_CONTROLLERBUTTONDOWN) {
-            if (event.cbutton.button == SDL_CONTROLLER_BUTTON_BACK) reset = true;
+            if (app.titleScreen) {
+                if (event.cbutton.button == SDL_CONTROLLER_BUTTON_A || event.cbutton.button == SDL_CONTROLLER_BUTTON_START) start = true;
+            } else if (event.cbutton.button == SDL_CONTROLLER_BUTTON_BACK) reset = true;
             else if (event.cbutton.button == SDL_CONTROLLER_BUTTON_START) app.paused = !app.paused;
             else if (event.cbutton.button == SDL_CONTROLLER_BUTTON_Y) app.camera.mode = (app.camera.mode + 1) % kCameraModeCount;
         }
     }
     PadPulse padPulse;
     DriveInput input = readDrive(app.pad, padPulse);
-    if (padPulse.reset) reset = true;
-    if (padPulse.pause) app.paused = !app.paused;
-    if (padPulse.camera) app.camera.mode = (app.camera.mode + 1) % kCameraModeCount;
+    if (app.titleScreen) {
+        start = start || padPulse.start || padPulse.pause;
+    } else {
+        if (padPulse.reset) reset = true;
+        if (padPulse.pause) app.paused = !app.paused;
+        if (padPulse.camera) app.camera.mode = (app.camera.mode + 1) % kCameraModeCount;
+    }
+    if (start && app.titleScreen) {
+        app.titleScreen = false;
+        resetRace(app);
+        reset = true;
+    }
     if (reset) {
         resetRace(app);
     }
@@ -677,7 +732,7 @@ void frame(void* userdata) {
     if (elapsed < 0) elapsed = 0;
     if (reset) elapsed = 0; // Do not consume time from before the reset.
 
-    if (app.paused) {
+    if (app.paused || app.titleScreen) {
         app.accumulator = 0;
     } else {
         app.accumulator += elapsed;
@@ -721,7 +776,7 @@ void frame(void* userdata) {
     const float wallVibrationDirection = app.car.wallContact
         ? RumbleState::wallDirection(app.car.yaw, app.car.ground.rightX,
                                      app.car.ground.rightZ, app.car.wallSide) : 0.0f;
-    const RumbleCommand vibration = app.rumble.update(float(elapsed), app.paused || !app.running,
+    const RumbleCommand vibration = app.rumble.update(float(elapsed), app.paused || app.titleScreen || !app.running,
         app.car.ground.found, app.car.onAsphalt, app.car.drifting, app.car.slipAngle,
         app.car.groundSpeed(), app.car.wallContact, wallVibrationDirection);
     sendRumble(app.pad, vibration);
@@ -730,7 +785,7 @@ void frame(void* userdata) {
     // 写像だとギア境界でピッチが跳ねたり往復したりするため。
     SoundState soundState = makeSoundState(
         app.car.speed, app.car.groundSpeed(), input.throttle, input.brake,
-        input.handbrake, app.car.drifting, std::fabs(app.car.slipAngle), app.paused,
+        input.handbrake, app.car.drifting, std::fabs(app.car.slipAngle), app.paused || app.titleScreen,
         app.countdown.remaining <= 0.0);
     soundState.rpm01 = app.engineVoice.update(std::fabs(app.car.speed), input.throttle,
                                               app.car.drifting, app.paused, float(elapsed));
@@ -787,8 +842,7 @@ void frame(void* userdata) {
     Mat4 viewProj = mul(proj, view);
     app.renderer.beginWorld(viewProj, app.camera.eye);
 
-    Mat4 identity;
-    app.renderer.draw(app.course, identity);
+    app.renderer.drawCourse(app.course, viewProj);
     // Marks lie just above the road and use ordinary translucent blending.
     app.skidMarks.build(app.camera.eye, app.skidVerts, app.skidIndices);
     app.renderer.drawGlow(app.skidVerts.data(), int(app.skidVerts.size()/7),
@@ -804,10 +858,14 @@ void frame(void* userdata) {
     }
     const float wheelX = 0.82f;
     const float wheelZ[2] = {1.42f, -1.38f};
-    const float steerForWheel[2] = {app.car.steerAngle, 0};
+    // Show the driver steering clearly even when the physics limits steering at speed.
+    const float steerForWheel[2] = {app.car.steerInput * 0.50f, 0};
     for (int i = 0; i < 2; ++i) {
         for (int side = -1; side <= 1; side += 2) {
-            Mat4 place = mul(translation(float(side) * wheelX, 0.34f, wheelZ[i]),
+            // The body moves on its springs; keep each wheel near the road.
+            const float wheelHeight = 0.34f - float(side) * wheelX * std::sin(app.car.bodyRoll)
+                                      - wheelZ[i] * std::sin(app.car.bodyPitch);
+            Mat4 place = mul(translation(float(side) * wheelX, wheelHeight, wheelZ[i]),
                              mul(rotationY(steerForWheel[i]), rotationX(app.car.wheelSpin)));
             app.renderer.draw(app.wheel, mul(model, place));
         }
@@ -842,7 +900,8 @@ void frame(void* userdata) {
                               app.trailIndices.data(), static_cast<int>(app.trailIndices.size()),
                               viewProj);
     }
-    drawHud(app);
+    if (app.titleScreen) drawTitle(app);
+    else drawHud(app);
     SDL_GL_SwapWindow(app.window);
 
 #ifndef __EMSCRIPTEN__
@@ -1004,7 +1063,8 @@ int main(int argc, char** argv) {
     // 音は全てリアルタイム合成（sound.cpp）。開けなくても無音で続行する。
     // 以前置いてあった SDL_mixer は初期化だけで何も鳴らしていなかったので置き換えた。
     app.sound.init();
-    app.course = app.renderer.upload(app.track.visual);
+    app.course = app.renderer.upload(app.track.visual, true);
+    app.track.visual = CpuMesh{}; // GPU owns the uploaded course geometry.
     CpuMesh body;
     CpuMesh brakeLights;
     CpuMesh wheel;

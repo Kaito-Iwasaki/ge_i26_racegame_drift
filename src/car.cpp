@@ -61,6 +61,7 @@ void Car::reset(const Track& track) {
     velForward = 0;
     velLateral = 0;
     yawRate = 0;
+    for (int i = 0; i < 4; ++i) { suspension[i] = 0; suspensionVel[i] = 0; }
     bodyRoll = 0;
     bodyRollVel = 0;
     bodyPitch = 0;
@@ -133,27 +134,25 @@ void Car::stepPhysics(float dt, const DriveInput& input) {
     yawRate += clampf(nextYawRate - yawRate, -5.5f * dt, 5.5f * dt);
     yaw = wrapPi(yaw + yawRate * dt);
 
-    // --- 車体の視覚ロール／ピッチ（重心の荷重移動） ---------------------------
-    // ロールはバネ・ダンパー（2次系）で駆動し、重さのある車体が遅れて傾き、
-    // わずかに行き過ぎてから落ち着く動きにする。目標角は控えめに抑えた
-    // （最大 ±0.080 rad ≒ 4.6°）。符号: 右旋回で bodyRoll>0 ＝上部が左（外）へ。
-    // ピッチは前後Gから：加速でノーズが上がり（沈み込み）、制動で前のめり。
+    // Four damped visual springs respond to tyre force and longitudinal load transfer.
+    // Steering alone does not tilt the body when the car is stationary.
     {
-        float speedFac = clampf(std::fabs(vF) / 15.0f, 0.0f, 1.0f);
-        float latG = yawRate * vF;
-        float rollTarget = clampf(steerInput * 0.028f * speedFac + latG * 0.0058f, -0.080f, 0.080f);
-        const float kSpring = 30.0f;   // ω ≒ 5.5 rad/s
-        const float kDamp = 6.5f;      // ζ ≒ 0.6（わずかな行き過ぎ）
-        bodyRollVel += ((rollTarget - bodyRoll) * kSpring - bodyRollVel * kDamp) * dt;
-        bodyRoll = clampf(bodyRoll + bodyRollVel * dt, -0.10f, 0.10f);
-
-        if (dt > 0.0f) {
-            float instLongG = (vF - prevVF) / dt;
-            longG += (instLongG - longG) * std::min(1.0f, dt * 6.0f);
-        }
+        const float instLongG = (vF - prevVF) / dt;
+        longG = approachExp(longG, instLongG, 6.0f, dt);
         prevVF = vF;
-        float pitchTarget = clampf(longG * 0.0038f, -0.04f, 0.04f);
-        bodyPitch = approachExp(bodyPitch, pitchTarget, 6.0f, dt);
+        for (int i = 0; i < 4; ++i) {
+            const float side = (i % 2 == 0) ? -1.0f : 1.0f;
+            const float axle = (i < 2) ? 1.0f : -1.0f;
+            const float target = clampf(side * tyreAccel * 0.0048f + axle * longG * 0.0040f, -0.10f, 0.10f);
+            suspensionVel[i] += ((target - suspension[i]) * 32.0f - suspensionVel[i] * 8.0f) * dt;
+            suspension[i] = clampf(suspension[i] + suspensionVel[i] * dt, -0.12f, 0.12f);
+        }
+        const float left = (suspension[0] + suspension[2]) * 0.5f;
+        const float right = (suspension[1] + suspension[3]) * 0.5f;
+        const float front = (suspension[0] + suspension[1]) * 0.5f;
+        const float rear = (suspension[2] + suspension[3]) * 0.5f;
+        bodyRoll = std::atan2(right - left, 1.64f);
+        bodyPitch = std::atan2(front - rear, 2.80f);
     }
     const float nfx = std::sin(yaw), nfz = std::cos(yaw);
     float forward = velX * nfx + velZ * nfz;

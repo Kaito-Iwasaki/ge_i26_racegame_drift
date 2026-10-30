@@ -2,6 +2,7 @@
 
 #include "geom.hpp"
 #include "meshbuild.hpp"
+#include "course_chunks.hpp"
 
 #include <vector>
 
@@ -10,6 +11,7 @@ struct GpuMesh {
     unsigned vbo = 0;
     unsigned ibo = 0;
     int indexCount = 0;
+    std::vector<CourseChunk> chunks;
 };
 
 struct Renderer {
@@ -22,6 +24,7 @@ struct Renderer {
     void drawSky();
     void beginWorld(const Mat4& viewProj, Vec3 cameraPos);
     void draw(const GpuMesh& mesh, const Mat4& model);
+    void drawCourse(const GpuMesh& mesh, const Mat4& viewProj);
     // タイヤ煙などの半透明ビルボード用。頂点は [xyz, uv, alpha] の 6 float。
     void drawSmoke(const float* verts, int vertCount, const unsigned* indices, int indexCount,
                    const Mat4& viewProj);
@@ -33,7 +36,7 @@ struct Renderer {
     void drawLine(float x0, float y0, float x1, float y1, float thickness, float r, float g, float b, float a);
     void drawText(float x, float y, float scale, const char* text, float r, float g, float b, float a);
     void flushHud();
-    GpuMesh upload(const CpuMesh& mesh);
+    GpuMesh upload(const CpuMesh& mesh, bool chunked = false);
 
     unsigned worldProgram = 0;
     unsigned skyProgram = 0;

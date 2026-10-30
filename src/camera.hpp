@@ -12,11 +12,11 @@ struct CameraPose {
 
 inline CameraPose carCameraPose(const Car& car, int mode, float pitch, float roll) {
     if (mode == kHoodCameraMode) {
-        // Mounted just above the base of the windshield: the bonnet remains visible.
-        const Vec3 localEye{0.0f, 1.28f, 0.72f};
+        // Mounted just ahead of the front bumper so the bonnet stays out of view.
+        const Vec3 localEye{0.0f, 1.28f, 2.50f};
         const Vec3 eye = carPointWorld(car, pitch, roll, localEye);
-        const Vec3 look = carPointWorld(car, pitch, roll, {0.0f, 1.00f, 25.0f});
-        const Vec3 upPoint = carPointWorld(car, pitch, roll, {0.0f, 2.28f, 0.72f});
+        const Vec3 look = carPointWorld(car, pitch, roll, {0.0f, 1.00f, 26.78f});
+        const Vec3 upPoint = carPointWorld(car, pitch, roll, {0.0f, 2.28f, 2.50f});
         return {eye, look, normalize(upPoint-eye)};
     }
     const float back[3] = {8.6f, 4.1f, 16.0f};
