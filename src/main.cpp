@@ -156,6 +156,8 @@ struct App {
     bool titleScreen = true;
     bool titleIntro = true;
     double titleTime = 0.0;
+    float demoCameraDistance = 0.0f;
+    Vec3 demoCameraEye{};
     bool showHelp = true;
     int menuSelection = 8;
     bool menuPadUp = false, menuPadDown = false, menuPadLeft = false, menuPadRight = false;
@@ -629,6 +631,15 @@ void drawMenuButton(Renderer& hud, MenuRect r, const char* label, bool selected,
     hud.drawText(r.x+(r.w-width)*0.5f,r.y+(r.h-7.0f*scale)*0.5f,scale,label,1,0.95f,0.88f,1);
 }
 
+// Each shot holds one roadside position while the camera pans toward the cars.
+void placeDemoCamera(App& app, float distance) {
+    const auto p=Rival::pose(app.track, app.track.raceStartS+distance);
+    const float side=app.track.halfWidth+app.track.curbWidth+4.0f;
+    app.demoCameraEye={p.x+std::cos(p.yaw)*side, p.y+p.cross*side+4.5f,
+                       p.z-std::sin(p.yaw)*side};
+    app.demoCameraDistance=distance;
+}
+
 void resetTitleDemo(App& app) {
     app.demoDriver.reset(app.track, app.track.raceStartS, 2);
     app.rival.reset(app.track, app.track.raceStartS + 18.0f, 2);
@@ -638,6 +649,7 @@ void resetTitleDemo(App& app) {
     app.skidMarks.clear(); app.rivalSkids.clear();
     app.brakeTrail.clear(); app.rivalTrail.clear();
     app.camera.mode=0; app.camera.blend=CameraBlend{};
+    placeDemoCamera(app,35.0f);
     app.accumulator=0;
 }
 
@@ -1104,7 +1116,18 @@ void frame(void* userdata) {
         app.rivalPitch=app.rivalSuspension.pitch()+app.rival.car.bodyPitch;
         app.rivalRoll=app.rivalSuspension.roll()+app.rival.car.bodyRoll;
     } else app.rivalSuspension.reset();
-    updateCamera(app, pitch, roll, app.paused ? 0.0f : float(elapsed));
+    if (app.titleScreen) {
+        // Switch to the next stationary roadside shot after the trailing car passes.
+        if (app.demoDriver.distanceTravelled > app.demoCameraDistance+12.0f)
+            placeDemoCamera(app,app.demoDriver.distanceTravelled+55.0f);
+        app.camera.eye=app.demoCameraEye;
+        app.camera.look={(app.car.x+app.rival.car.x)*.5f,
+                         (app.car.y+app.rival.car.y)*.5f+1.0f,
+                         (app.car.z+app.rival.car.z)*.5f};
+        app.camera.up={0,1,0};
+    } else {
+        updateCamera(app, pitch, roll, app.paused ? 0.0f : float(elapsed));
+    }
 
     // ブレーキランプ点灯中は、左右ランプの位置を履歴に残して光の軌跡にする。
     if (!app.paused) {
