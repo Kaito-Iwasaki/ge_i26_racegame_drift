@@ -7,7 +7,7 @@ Track straight(){Track t;t.closed=false;t.halfWidth=5;t.curbWidth=.7f;t.runoff=2
  for(int i=0;i<=200;i++){TrackSample p;p.z=i*5.f;p.s=i*5.f;t.samples.push_back(p);}t.spawnZ=100;return t;}
 int main(){Track t=straight();
  for(int level=0;level<3;level++){
-  Car p;p.reset(t);p.x=2.1f;p.ground=t.query(p.x,p.z,p.y);Rival r;r.reset(t,p.ground.s,level); r.preferredLane=(level==2?-2.5f:-2.1f);
+  Car p;p.reset(t);p.x=2.1f;p.ground=t.query(p.x,p.z,p.y);Rival r;r.reset(t,p.ground.s,level); r.preferredLane=(level==2?-2.9f:-2.1f);
   assert(std::fabs(p.ground.s-r.s)<.01f && std::hypot(p.x-r.car.x,p.z-r.car.z)>4.1f);
   assert(!resolveVehicleContact(p,r.car).hit);
   DriveInput gas;gas.throttle=1;
