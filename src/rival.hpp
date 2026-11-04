@@ -83,8 +83,11 @@ struct Rival {
         }
         // Ease braking in a slide and let the driver accelerate promptly once grip returns.
         if (level==2) driftExitTime=car.drifting ? 1.5f : std::max(0.0f,driftExitTime-dt);
-        input.steer=clampf(error*(level==2 ? 9.0f : 2.8f)-car.yawRate*(level==2 ? .6f : .45f)-(level==2 ? 2.0f*car.slipAngle : 0.0f),-1.0f,1.0f);
+        input.steer=clampf(error*(level==2 ? 9.0f : 2.8f)-car.yawRate*(level==2 ? .3f : .45f)-(level==2 ? 2.0f*car.slipAngle : 0.0f),-1.0f,1.0f);
         input.throttle=(!finished && (speed<target || (level==2 && driftExitTime>0.0f && speed<target+5.0f)) && !car.drifting && std::fabs(car.slipAngle)<(level==2?.20f:.12f))?1.0f:0.0f;
+        // Apply the same full throttle available to the player while the slide is controllable.
+        if(level==2 && !finished && car.drifting && speed<target && std::fabs(car.slipAngle)<.55f)
+            input.throttle=1.0f;
         input.brake=(speed>target+(level==2 ? 4.0f : 1.0f)) ? clampf((speed-target)*(level==2 ? .05f : .20f),0,1) : 0.0f;
         if(level==2 && car.drifting) input.brake=std::min(input.brake,.08f);
         if(level==2 && input.throttle>0.0f) input.brake=0.0f;
