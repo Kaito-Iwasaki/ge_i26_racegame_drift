@@ -56,14 +56,14 @@ struct Rival {
         speed=car.groundSpeed();
         const float look=clampf(10.0f+speed*(level==2 ? 1.0f : .65f),12.0f,40.0f);
         const auto aim=pose(t,s+look), near=pose(t,s+4), far=pose(t,s+65);
-        const float targetLane=preferredLane + (level==2 ? .6f : 0.0f);
+        const float targetLane=preferredLane + (level==2 ? .4f : 0.0f);
         const float tx=aim.x+std::cos(aim.yaw)*targetLane-car.x;
         const float tz=aim.z-std::sin(aim.yaw)*targetLane-car.z;
         const float heading=std::atan2(tx,tz);
         const float error=wrapPi(heading-car.yaw);
         const float bend=std::fabs(wrapPi(far.yaw-near.yaw));
         const float corner[3]={15.0f,17.0f,26.0f};
-        float target=finished?0.0f:VehicleTuning::maxSpeed+(corner[level]-VehicleTuning::maxSpeed)*clampf(level==2 ? (bend-.3f)/1.2f : (bend-.05f)/.65f,0,1);
+        float target=finished?0.0f:VehicleTuning::maxSpeed+(corner[level]-VehicleTuning::maxSpeed)*clampf(level==2 ? (bend-.2f)/1.2f : (bend-.05f)/.65f,0,1);
         const float progress=t.closed ? distanceTravelled/std::max(1.0f,t.length) :
             (s-t.raceStartS)/std::max(1.0f,t.raceFinishS-t.raceStartS);
         if (playerS>=0.0f && !finished && level<2) {
@@ -82,7 +82,7 @@ struct Rival {
         }
         input.steer=clampf(error*(level==2 ? 9.0f : 2.8f)-car.yawRate*.45f,-1.0f,1.0f);
         input.throttle=(!finished && speed<target && !car.drifting && std::fabs(car.slipAngle)<.12f)?1.0f:0.0f;
-        input.brake=(speed>target+(level==2 ? 4.0f : 1.0f)) ? clampf((speed-target)*(level==2 ? .12f : .20f),0,1) : 0.0f;
+        input.brake=(speed>target+(level==2 ? 4.0f : 1.0f)) ? clampf((speed-target)*(level==2 ? .04f : .20f),0,1) : 0.0f;
         input.handbrake=false;
         braking=brakeLightsActive(input,car.speed);
         car.update(dt,input,t);
