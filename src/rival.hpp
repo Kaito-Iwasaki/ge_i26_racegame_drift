@@ -10,6 +10,7 @@ struct Rival {
     DriveInput input;
     float s=0, speed=0, drift=0, distanceTravelled=0;
     float lane=-2.10f, laneVelocity=0;
+    float preferredLane=-0.6f;
     bool finished=false, braking=false;
     int level=1;
     struct RoutePose {float x,y,z,cross,yaw;};
@@ -30,7 +31,7 @@ struct Rival {
                 a.cross+(b.cross-a.cross)*f,std::atan2(dx,dz)};
     }
     void reset(const Track& t,float playerS,int difficulty) {
-        car.reset(t); level=std::max(0,std::min(2,difficulty));
+        car.reset(t); preferredLane=-0.6f; level=std::max(0,std::min(2,difficulty));
         s=normalizedS(t,playerS); const auto p=pose(t,s); lane=-2.10f;
         car.x=p.x+std::cos(p.yaw)*lane; car.z=p.z-std::sin(p.yaw)*lane;
         car.y=p.y+p.cross*lane; car.yaw=p.yaw;
@@ -55,7 +56,7 @@ struct Rival {
         speed=car.groundSpeed();
         const float look=clampf(10.0f+speed*.65f,12.0f,40.0f);
         const auto aim=pose(t,s+look), near=pose(t,s+4), far=pose(t,s+65);
-        const float targetLane=-0.6f;
+        const float targetLane=preferredLane;
         const float tx=aim.x+std::cos(aim.yaw)*targetLane-car.x;
         const float tz=aim.z-std::sin(aim.yaw)*targetLane-car.z;
         const float heading=std::atan2(tx,tz);

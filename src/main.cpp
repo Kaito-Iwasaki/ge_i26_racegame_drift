@@ -156,7 +156,8 @@ struct App {
     bool titleScreen = true;
     bool titleIntro = true;
     double titleTime = 0.0;
-    float demoCameraDistance = 0.0f;
+    double demoShotStarted = 0.0;
+    int demoShot = 0;
     Vec3 demoCameraEye{};
     bool showHelp = true;
     int menuSelection = 8;
@@ -631,25 +632,31 @@ void drawMenuButton(Renderer& hud, MenuRect r, const char* label, bool selected,
     hud.drawText(r.x+(r.w-width)*0.5f,r.y+(r.h-7.0f*scale)*0.5f,scale,label,1,0.95f,0.88f,1);
 }
 
-// Each shot holds one roadside position while the camera pans toward the cars.
-void placeDemoCamera(App& app, float distance) {
-    const auto p=Rival::pose(app.track, app.track.raceStartS+distance);
-    const float side=app.track.halfWidth+app.track.curbWidth+4.0f;
-    app.demoCameraEye={p.x+std::cos(p.yaw)*side, p.y+p.cross*side+4.5f,
+// Hold a roadside position for several seconds, varying side, height and framing.
+void placeDemoCamera(App& app, float roadS) {
+    const auto p=Rival::pose(app.track, roadS);
+    const float sideSign=(app.demoShot%2==0)?1.0f:-1.0f;
+    const float side=sideSign*(app.track.halfWidth+app.track.curbWidth+
+                               (app.demoShot%4==2?9.0f:4.5f));
+    const float heights[4]={3.0f,6.0f,8.0f,4.0f};
+    app.demoCameraEye={p.x+std::cos(p.yaw)*side,
+                       p.y+p.cross*side+heights[app.demoShot%4],
                        p.z-std::sin(p.yaw)*side};
-    app.demoCameraDistance=distance;
+    app.demoShotStarted=app.titleTime;
 }
-
 void resetTitleDemo(App& app) {
     app.demoDriver.reset(app.track, app.track.raceStartS, 2);
-    app.rival.reset(app.track, app.track.raceStartS + 18.0f, 2);
+    app.rival.reset(app.track, app.track.raceStartS + 14.0f, 1);
+    app.demoDriver.preferredLane=1.2f;
+    app.rival.preferredLane=-1.2f;
     app.car=app.demoDriver.car;
     app.suspensionVisual.reset(); app.rivalSuspension.reset();
     app.smoke.clear(); app.rivalSmoke.clear();
     app.skidMarks.clear(); app.rivalSkids.clear();
     app.brakeTrail.clear(); app.rivalTrail.clear();
     app.camera.mode=0; app.camera.blend=CameraBlend{};
-    placeDemoCamera(app,35.0f);
+    app.demoShot=0;
+    placeDemoCamera(app,app.track.raceStartS+35.0f);
     app.accumulator=0;
 }
 
@@ -1117,9 +1124,14 @@ void frame(void* userdata) {
         app.rivalRoll=app.rivalSuspension.roll()+app.rival.car.bodyRoll;
     } else app.rivalSuspension.reset();
     if (app.titleScreen) {
-        // Switch to the next stationary roadside shot after the trailing car passes.
-        if (app.demoDriver.distanceTravelled > app.demoCameraDistance+12.0f)
-            placeDemoCamera(app,app.demoDriver.distanceTravelled+55.0f);
+        // Keep each shot long enough to see the cars approach and pass.
+        const double shotAge=app.titleTime-app.demoShotStarted;
+        const float dx=app.car.x-app.demoCameraEye.x, dz=app.car.z-app.demoCameraEye.z;
+        if (shotAge>=7.0 || (shotAge>=5.0 && dx*dx+dz*dz>140.0f*140.0f)) {
+            ++app.demoShot;
+            const float offsets[4]={45.0f,55.0f,30.0f,65.0f};
+            placeDemoCamera(app,app.demoDriver.s+offsets[app.demoShot%4]);
+        }
         app.camera.eye=app.demoCameraEye;
         app.camera.look={(app.car.x+app.rival.car.x)*.5f,
                          (app.car.y+app.rival.car.y)*.5f+1.0f,
