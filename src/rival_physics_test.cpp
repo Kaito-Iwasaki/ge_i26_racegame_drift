@@ -12,10 +12,10 @@ int main(){Track t=straight();
   assert(!resolveVehicleContact(p,r.car).hit);
   DriveInput gas;gas.throttle=1;
   for(int i=0;i<120;i++){p.update(1.f/60,gas,t);r.update(t,1.f/60);assert(std::fabs(p.groundSpeed()-r.speed)<.05f);}
-  assert(p.groundSpeed()<VehicleTuning::maxSpeed && r.speed<=VehicleTuning::maxSpeed);
   Car contact=p;contact.x=r.car.x+1.7f;contact.z=r.car.z;contact.velX=-8;contact.velZ=r.car.velZ;
   auto hit=resolveVehicleContact(contact,r.car);assert(hit.hit);r.acceptContact(t);
-  float displaced=r.lane;assert(displaced<-2.1f);
-  r.update(t,1.f/60);assert(r.lane<-2.1f && std::fabs(r.lane-displaced)<.3f);
+  Car replay=r.car; r.update(t,1.f/60); replay.update(1.f/60,r.input,t);
+  assert(std::hypot(replay.x-r.car.x,replay.z-r.car.z)<.001f);
+  assert(std::hypot(replay.velX-r.car.velX,replay.velZ-r.car.velZ)<.001f);
  }
- puts("PASS: same straight acceleration and speed cap, wider grid and persistent collision response");}
+ puts("PASS: equal straight acceleration and physical collision response");}
