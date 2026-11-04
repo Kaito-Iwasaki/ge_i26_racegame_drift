@@ -11,6 +11,7 @@ struct Rival {
     float s=0, speed=0, drift=0, distanceTravelled=0;
     float lane=-2.10f, laneVelocity=0;
     float preferredLane=-0.6f;
+    float driftExitTime=0;
     bool finished=false, braking=false;
     int level=1;
     struct RoutePose {float x,y,z,cross,yaw;};
@@ -36,7 +37,7 @@ struct Rival {
         car.x=p.x+std::cos(p.yaw)*lane; car.z=p.z-std::sin(p.yaw)*lane;
         car.y=p.y+p.cross*lane; car.yaw=p.yaw;
         car.ground=t.query(car.x,car.z,car.y,s);
-        input={}; speed=drift=distanceTravelled=laneVelocity=0; finished=braking=false;
+        input={}; speed=drift=distanceTravelled=laneVelocity=driftExitTime=0; finished=braking=false;
     }
     void acceptContact(const Track& t) {
         TrackPose p=t.query(car.x,car.z,car.y,normalizedS(t,s));
@@ -80,9 +81,13 @@ struct Rival {
             const float match=clampf(playerSpeed+2.0f,0,VehicleTuning::maxSpeed);
             target+=(std::max(target,match)-target)*catchUp;
         }
+        // Ease braking in a slide and let the driver accelerate promptly once grip returns.
+        if (level==2) driftExitTime=car.drifting ? 1.5f : std::max(0.0f,driftExitTime-dt);
         input.steer=clampf(error*(level==2 ? 9.0f : 2.8f)-car.yawRate*(level==2 ? .6f : .45f)-(level==2 ? 2.0f*car.slipAngle : 0.0f),-1.0f,1.0f);
-        input.throttle=(!finished && speed<target && !car.drifting && std::fabs(car.slipAngle)<.12f)?1.0f:0.0f;
+        input.throttle=(!finished && (speed<target || (level==2 && driftExitTime>0.0f && speed<target+5.0f)) && !car.drifting && std::fabs(car.slipAngle)<(level==2?.20f:.12f))?1.0f:0.0f;
         input.brake=(speed>target+(level==2 ? 4.0f : 1.0f)) ? clampf((speed-target)*(level==2 ? .05f : .20f),0,1) : 0.0f;
+        if(level==2 && car.drifting) input.brake=std::min(input.brake,.08f);
+        if(level==2 && input.throttle>0.0f) input.brake=0.0f;
         input.handbrake=false;
         braking=brakeLightsActive(input,car.speed);
         car.update(dt,input,t);
