@@ -110,6 +110,7 @@ struct App {
     Track track;
     Car car;
     Rival rival;
+    Rival demoDriver;
     SmokeSystem rivalSmoke;
     SuspensionVisual rivalSuspension;
     SkidMarks rivalSkids;
@@ -153,6 +154,8 @@ struct App {
     bool night = false;
     bool uphill = false;
     bool titleScreen = true;
+    bool titleIntro = true;
+    double titleTime = 0.0;
     bool showHelp = true;
     int menuSelection = 8;
     bool menuPadUp = false, menuPadDown = false, menuPadLeft = false, menuPadRight = false;
@@ -246,6 +249,7 @@ struct PadPulse {
     bool camera = false;
     bool start = false;
     bool night = false;
+    bool any = false;
     bool menuUp = false, menuDown = false, menuLeft = false, menuRight = false;
 };
 
@@ -305,6 +309,8 @@ PadPulse readBrowserPad(DriveInput& input) {
         auto held = [&](int index) {
             return index < pad.numButtons && pad.digitalButton[index];
         };
+        for (int button=0; button<pad.numButtons; ++button)
+            pulse.any = pulse.any || pad.digitalButton[button];
         const bool standard = std::strcmp(pad.mapping, "standard") == 0 || (pad.numButtons >= 16 && pad.numAxes >= 2);
         up = up || axis(1) < -0.55f || held(12);
         down = down || axis(1) > 0.55f || held(13);
@@ -382,6 +388,7 @@ DriveInput readDrive(SDL_GameController* pad, PadPulse& pulse) {
     // SDL はブラウザのパッドをゲームコントローラと認識しないことが多い。
     // 標準マッピングを Gamepad API から直接読む。
     PadPulse browser = readBrowserPad(input);
+    pulse.any=browser.any;
     pulse.menuUp=browser.menuUp; pulse.menuDown=browser.menuDown;
     pulse.menuLeft=browser.menuLeft; pulse.menuRight=browser.menuRight;
     pulse.night = pulse.night || browser.night;
@@ -622,6 +629,33 @@ void drawMenuButton(Renderer& hud, MenuRect r, const char* label, bool selected,
     hud.drawText(r.x+(r.w-width)*0.5f,r.y+(r.h-7.0f*scale)*0.5f,scale,label,1,0.95f,0.88f,1);
 }
 
+void resetTitleDemo(App& app) {
+    app.demoDriver.reset(app.track, app.track.raceStartS, 2);
+    app.rival.reset(app.track, app.track.raceStartS + 18.0f, 2);
+    app.car=app.demoDriver.car;
+    app.suspensionVisual.reset(); app.rivalSuspension.reset();
+    app.smoke.clear(); app.rivalSmoke.clear();
+    app.skidMarks.clear(); app.rivalSkids.clear();
+    app.brakeTrail.clear(); app.rivalTrail.clear();
+    app.camera.mode=0; app.camera.blend=CameraBlend{};
+    app.accumulator=0;
+}
+
+void drawTitleIntro(App& app) {
+    Renderer& hud=app.renderer; hud.beginHud();
+    const float w=float(hud.width), h=float(hud.height);
+    const float scale=std::min(w/900.0f,h/600.0f);
+    hud.addQuad(0,0,w,h,0.01f,0.02f,0.04f,.27f);
+    const char* title="RACE GAME DRIFT";
+    const float titleScale=5.0f*scale;
+    hud.drawText((w-std::strlen(title)*6.0f*titleScale)*.5f,h*.19f,titleScale,title,1,.95f,.85f,1);
+    if (std::fmod(app.titleTime,1.4)<.95) {
+        const char* prompt="PRESS ANY KEY"; const float size=2.5f*scale;
+        hud.drawText((w-std::strlen(prompt)*6.0f*size)*.5f,h*.78f,size,prompt,1,.82f,.52f,1);
+    }
+    hud.flushHud();
+}
+
 void drawTitle(App& app) {
     Renderer& hud=app.renderer; hud.beginHud();
     MenuLayout m(float(hud.width),float(hud.height));
@@ -766,7 +800,7 @@ void sampleWheelRoad(const App& app, const Car& car, float road[4]) {
 }
 
 void drawRival(App& app) {
-    if (app.battle && !app.titleScreen && rivalNear(app,300.0f)) {
+    if ((app.battle || app.titleScreen) && rivalNear(app,300.0f)) {
         const Car& rival=app.rival.car;
         const float rivalPitch=app.rivalPitch, rivalRoll=app.rivalRoll;
         const Mat4 rivalModel=carModelMatrix(rival,rivalPitch,rivalRoll);
@@ -787,7 +821,7 @@ void setRivalLighting(App& app) {
     const float p=app.rivalPitch, roll=app.rivalRoll;
     const Vec3 o=carPointWorld(r,p,roll,{0,0,0});
     const Vec3 f=normalize(carPointWorld(r,p,roll,{0,0,1})-o);
-    app.renderer.setRivalLighting(app.battle && !app.titleScreen && rivalNear(app,300.0f),app.rival.braking,
+    app.renderer.setRivalLighting((app.battle || app.titleScreen) && rivalNear(app,300.0f),app.rival.braking,
         carPointWorld(r,p,roll,{-.52f,.60f,2.18f}),carPointWorld(r,p,roll,{.52f,.60f,2.18f}),
         f,carPointWorld(r,p,roll,{0,.70f,-2.05f}));
 }
@@ -810,7 +844,7 @@ void drawFlares(App& app,Vec3 camera,Vec3 look,Vec3 up,const Mat4& vp,float play
         }
     };
     vehicle(app.car,playerPitch,playerRoll,app.night,app.braking);
-    if(app.battle && !app.titleScreen && rivalNear(app,300.0f)) vehicle(app.rival.car,app.rivalPitch,app.rivalRoll,app.night,app.rival.braking);
+    if((app.battle || app.titleScreen) && rivalNear(app,300.0f)) vehicle(app.rival.car,app.rivalPitch,app.rivalRoll,app.night,app.rival.braking);
     app.renderer.drawGlow(app.flareVerts.data(),int(app.flareVerts.size()/7),app.flareIndices.data(),int(app.flareIndices.size()),vp);
 }
 
@@ -822,7 +856,14 @@ void frame(void* userdata) {
     SDL_Event event;
     bool reset = false, activate = false, start = false, togglePause = false;
     int dx = 0, dy = 0;
+    bool leaveIntro = false;
     while (SDL_PollEvent(&event)) {
+        if (app.titleScreen && app.titleIntro &&
+            ((event.type==SDL_KEYDOWN && !event.key.repeat) ||
+             (event.type==SDL_MOUSEBUTTONDOWN && event.button.button==SDL_BUTTON_LEFT) ||
+             event.type==SDL_CONTROLLERBUTTONDOWN)) { leaveIntro=true; continue; }
+        if (app.titleScreen && app.titleIntro && event.type!=SDL_QUIT &&
+            event.type!=SDL_CONTROLLERDEVICEADDED && event.type!=SDL_CONTROLLERDEVICEREMOVED) continue;
         if (event.type == SDL_QUIT) app.running = false;
         else if (event.type == SDL_KEYDOWN && !event.key.repeat) {
             SDL_Scancode code = event.key.keysym.scancode;
@@ -878,7 +919,14 @@ void frame(void* userdata) {
         padPulse.start=confirm && !app.menuPadConfirm; app.menuPadConfirm=confirm;
     } else app.menuPadConfirm=false;
 #endif
-    if (app.titleScreen || app.paused) {
+    if (app.titleScreen && app.titleIntro && (leaveIntro || padPulse.any || padPulse.start || padPulse.pause ||
+        padPulse.menuUp || padPulse.menuDown || padPulse.menuLeft || padPulse.menuRight)) {
+        app.titleIntro=false;
+        dx=dy=0; activate=start=togglePause=false;
+        // Consume this input so it cannot also activate a setting or start the race.
+        padPulse=PadPulse{};
+    }
+    if ((app.titleScreen && !app.titleIntro) || app.paused) {
         if(padPulse.menuUp && !app.menuPadUp) dy=-1;
         if(padPulse.menuDown && !app.menuPadDown) dy=1;
         if(padPulse.menuLeft && !app.menuPadLeft) dx=-1;
@@ -914,13 +962,13 @@ void frame(void* userdata) {
     } else if (activate && app.paused) {
         if(app.menuSelection==0) app.paused=false;
         else if(app.menuSelection==1) { app.paused=false; reset=true; }
-        else { app.paused=false; app.titleScreen=true; app.menuSelection=8; reset=true; }
+        else { app.paused=false; app.titleScreen=true; app.titleIntro=true; app.menuSelection=8; reset=true; }
     }
     if (start && app.titleScreen) {
         app.track.setUphill(app.uphill);
         app.titleScreen=false; reset=true;
     }
-    if (reset) resetRace(app);
+    if (reset) { resetRace(app); if(app.titleScreen) resetTitleDemo(app); }
 
     Uint64 now = SDL_GetPerformanceCounter();
     double elapsed = double(now - app.prevCounter) / double(SDL_GetPerformanceFrequency());
@@ -933,7 +981,22 @@ void frame(void* userdata) {
     if (elapsed < 0) elapsed = 0;
     if (reset) elapsed = 0; // Do not consume time from before the reset.
 
-    if (app.paused || app.titleScreen) {
+    if (app.titleScreen) {
+        app.titleTime += elapsed;
+        app.accumulator += elapsed;
+        int guard=0;
+        while (app.accumulator >= kFixedStepSec && guard++ < 8) {
+            const float dt=float(kFixedStepSec)*kDrivingPace;
+            app.demoDriver.update(app.track,dt);
+            app.rival.update(app.track,dt);
+            app.car=app.demoDriver.car;
+            recordTyreMarks(app,app.car,app.skidMarks,app.demoDriver.braking,app.demoDriver.input.brake);
+            recordTyreMarks(app,app.rival.car,app.rivalSkids,app.rival.braking,app.rival.input.brake);
+            app.accumulator-=kFixedStepSec;
+            if (app.demoDriver.finished || app.rival.finished) { resetTitleDemo(app); break; }
+        }
+        input=app.demoDriver.input;
+    } else if (app.paused) {
         app.accumulator = 0;
     } else {
         app.accumulator += elapsed;
@@ -1030,18 +1093,18 @@ void frame(void* userdata) {
     // The hood camera and vehicle mesh use the same pitch and roll.
     float wheelRoad[4];
     sampleWheelRoad(app, app.car, wheelRoad);
-    app.suspensionVisual.update(wheelRoad, (app.paused || app.titleScreen) ? 0.0f : float(elapsed));
+    app.suspensionVisual.update(wheelRoad, app.paused ? 0.0f : float(elapsed));
     app.car.bodyHeave = app.suspensionVisual.heave(app.car.y);
     float pitch = app.suspensionVisual.pitch() + app.car.bodyPitch;
     float roll = app.suspensionVisual.roll() + app.car.bodyRoll;
-    if (app.battle && !app.titleScreen && rivalNear(app,300.0f)) {
+    if ((app.battle || app.titleScreen) && rivalNear(app,300.0f)) {
         sampleWheelRoad(app,app.rival.car,app.rivalWheelRoad);
         app.rivalSuspension.update(app.rivalWheelRoad,app.paused?0.0f:float(elapsed));
         app.rival.car.bodyHeave=app.rivalSuspension.heave(app.rival.car.y);
         app.rivalPitch=app.rivalSuspension.pitch()+app.rival.car.bodyPitch;
         app.rivalRoll=app.rivalSuspension.roll()+app.rival.car.bodyRoll;
     } else app.rivalSuspension.reset();
-    updateCamera(app, pitch, roll, (app.paused || app.titleScreen) ? 0.0f : float(elapsed));
+    updateCamera(app, pitch, roll, app.paused ? 0.0f : float(elapsed));
 
     // ブレーキランプ点灯中は、左右ランプの位置を履歴に残して光の軌跡にする。
     if (!app.paused) {
@@ -1051,7 +1114,7 @@ void frame(void* userdata) {
             app.brakeTrail.record(lampL, lampR);
         }
         app.brakeTrail.update(float(elapsed));
-        if (app.battle && !app.titleScreen && rivalNear(app,250.0f) && app.rival.braking && app.rival.car.groundSpeed()>2.5f) {
+        if ((app.battle || app.titleScreen) && rivalNear(app,250.0f) && app.rival.braking && app.rival.car.groundSpeed()>2.5f) {
             const Car& r=app.rival.car;
             app.rivalTrail.record(carPointWorld(r,app.rivalPitch,app.rivalRoll,{-.535f,.70f,-2.0f}),
                                   carPointWorld(r,app.rivalPitch,app.rivalRoll,{ .535f,.70f,-2.0f}));
@@ -1074,7 +1137,7 @@ void frame(void* userdata) {
                            float(elapsed), 0.80f, 160);
         }
         app.smoke.update(float(elapsed));
-        if (app.battle && !app.titleScreen && rivalNear(app,200.0f) && app.rival.car.drifting) {
+        if ((app.battle || app.titleScreen) && rivalNear(app,200.0f) && app.rival.car.drifting) {
             const Car& r=app.rival.car;
             Vec3 f{std::sin(r.yaw),0,std::cos(r.yaw)}, right{f.z,0,-f.x};
             Vec3 base{r.x,r.y+0.12f,r.z}; base=base-f*1.38f;
@@ -1113,7 +1176,7 @@ void frame(void* userdata) {
     // Marks lie just above the road and use ordinary translucent blending.
     app.skidVerts.clear();app.skidIndices.clear();
     app.skidMarks.append(app.camera.eye,app.skidVerts,app.skidIndices,&effectView);
-    if (app.battle) app.rivalSkids.append(app.camera.eye,app.skidVerts,app.skidIndices,&effectView);
+    if (app.battle || app.titleScreen) app.rivalSkids.append(app.camera.eye,app.skidVerts,app.skidIndices,&effectView);
     app.renderer.drawGlow(app.skidVerts.data(),int(app.skidVerts.size()/7),
                           app.skidIndices.data(),int(app.skidIndices.size()),viewProj,false);
     app.renderer.beginWorld(viewProj, app.camera.eye, app.night, lampLeft, lampRight, lampDirection, rearLight, app.braking, reversing);
@@ -1145,7 +1208,7 @@ void frame(void* userdata) {
         Vec3 camUp = cross(camRight, camFwd);
         app.smokeVerts.clear();app.smokeIndices.clear();
         app.smoke.appendQuads(camRight,camUp,app.smokeVerts,app.smokeIndices,&effectView);
-        if (app.battle && !app.titleScreen)
+        if ((app.battle || app.titleScreen))
             app.rivalSmoke.appendQuads(camRight,camUp,app.smokeVerts,app.smokeIndices,&effectView);
         app.renderer.drawSmoke(app.smokeVerts.data(),int(app.smokeVerts.size()/6),
                                app.smokeIndices.data(),int(app.smokeIndices.size()),viewProj);
@@ -1165,7 +1228,7 @@ void frame(void* userdata) {
     {
         app.trailVerts.clear();app.trailIndices.clear();
         app.brakeTrail.appendQuads(app.trailVerts,app.trailIndices);
-        if (app.battle && !app.titleScreen) app.rivalTrail.appendQuads(app.trailVerts,app.trailIndices);
+        if ((app.battle || app.titleScreen)) app.rivalTrail.appendQuads(app.trailVerts,app.trailIndices);
         app.renderer.drawGlow(app.trailVerts.data(),int(app.trailVerts.size()/7),
                               app.trailIndices.data(),int(app.trailIndices.size()),viewProj);
     }
@@ -1197,7 +1260,7 @@ void frame(void* userdata) {
         h.addQuad(x+w,y,x+w+3,y+hh,.16f,.18f,.20f,1);
         h.flushHud();
     }
-    if (app.titleScreen) drawTitle(app);
+    if (app.titleScreen) { if(app.titleIntro) drawTitleIntro(app); else drawTitle(app); }
     else { drawHud(app); if (app.paused) drawPauseMenu(app); }
     SDL_GL_SwapWindow(app.window);
 
@@ -1388,6 +1451,7 @@ int main(int argc, char** argv) {
     app.wheel = app.renderer.upload(wheel);
     app.shadow = app.renderer.upload(shadow);
     app.car.reset(app.track);
+    resetTitleDemo(app);
     app.prevCounter = SDL_GetPerformanceCounter();
 
 #ifdef __EMSCRIPTEN__
