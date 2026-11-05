@@ -20,12 +20,23 @@ int main(int argc,char**argv) {
     if(r.input.brake>.05f) brakeFrames++; brakeTotal+=r.input.brake;
     frames++;
    }
-   assert(r.finished && drifting>10); times[level]=frames/60.f;
+   assert(r.finished && drifting>10); assert(wallFrames==0); times[level]=frames/60.f;
    if(level==2) { assert(times[level]<218.0f); assert(wallFrames==0); assert(exitAcceleration>0); assert(driftThrottle>0); assert(brakeFrames<35*60); assert(brakeTotal/60.0f<8.0f); }
    printf("%s level %d %.1fs drift frames %d max gain %.4f m/s\n",uphill?"UP":"DOWN",level,times[level],drifting,maxGain);
    printf("  wall contact frames %d\n",wallFrames);
   }
   assert(times[0]>times[1] && times[1]>times[2]);
+  // A far-ahead player must not make catch-up overspeed the corners.
+  for(int level=0;level<2;level++) {
+   Rival r; r.reset(t,t.query(t.spawnX,t.spawnZ,t.spawnY).s,level);
+   int frames=0, wallFrames=0;
+   while(!r.finished && frames<24000) {
+    r.update(t,1.25f/60,r.s+300.0f,35.0f);
+    if(r.car.wallContact) wallFrames++;
+    frames++;
+   }
+   assert(r.finished && wallFrames==0);
+  }
  }
  puts("PASS: both directions, all difficulties, shared physics input replay and controlled drift throttle");
 }

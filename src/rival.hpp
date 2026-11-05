@@ -79,7 +79,9 @@ struct Rival {
             target*=1.0f-(level==0?.28f:.22f)*lead*weight;
             const float catchUp=clampf((gap-200.0f)/100.0f,0,1);
             const float match=clampf(playerSpeed+2.0f,0,VehicleTuning::maxSpeed);
-            target+=(std::max(target,match)-target)*catchUp;
+            // Catch up on straights; keep the corner-speed limit where braking is needed.
+            const float straightWeight=1.0f-clampf((bend-.06f)/.35f,0.0f,1.0f);
+            target+=(std::max(target,match)-target)*catchUp*straightWeight;
         }
         // Ease braking in a slide and let the driver accelerate promptly once grip returns.
         if (level==2) driftExitTime=car.drifting ? 1.5f : std::max(0.0f,driftExitTime-dt);
@@ -92,7 +94,7 @@ struct Rival {
         if(level==2 && car.drifting) input.brake=std::min(input.brake,.08f);
         if(level==2 && input.throttle>0.0f) input.brake=0.0f;
         // Predict outward drift in road coordinates and lift before reaching the rail.
-        if (level==2 && car.ground.found) {
+        if (car.ground.found) {
             const float lateralSpeed=car.velX*car.ground.rightX+car.velZ*car.ground.rightZ;
             const float projected=lane+lateralSpeed*.6f;
             const float safeLateral=std::max(1.0f,t.halfWidth-.15f);
