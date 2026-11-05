@@ -57,7 +57,7 @@ struct Rival {
         speed=car.groundSpeed();
         const float look=clampf(10.0f+speed*(level==2 ? 1.0f : .65f),12.0f,40.0f);
         const auto aim=pose(t,s+look), near=pose(t,s+4), far=pose(t,s+(level==2?50:65));
-        const float targetLane=preferredLane + (level==2 ? .8f : 0.0f);
+        const float targetLane=preferredLane + (level==2 ? .4f : 0.0f);
         const float tx=aim.x+std::cos(aim.yaw)*targetLane-car.x;
         const float tz=aim.z-std::sin(aim.yaw)*targetLane-car.z;
         const float heading=std::atan2(tx,tz);
@@ -91,6 +91,16 @@ struct Rival {
         input.brake=(speed>target+(level==2 ? 4.0f : 1.0f)) ? clampf((speed-target)*(level==2 ? .05f : .20f),0,1) : 0.0f;
         if(level==2 && car.drifting) input.brake=std::min(input.brake,.08f);
         if(level==2 && input.throttle>0.0f) input.brake=0.0f;
+        // Predict outward drift in road coordinates and lift before reaching the rail.
+        if (level==2 && car.ground.found) {
+            const float lateralSpeed=car.velX*car.ground.rightX+car.velZ*car.ground.rightZ;
+            const float projected=lane+lateralSpeed*.6f;
+            const float safeLateral=std::max(1.0f,t.halfWidth-.15f);
+            if (std::fabs(projected)>safeLateral && projected*lateralSpeed>0.0f) {
+                input.throttle=0.0f;
+                input.brake=std::max(input.brake,.08f);
+            }
+        }
         input.handbrake=false;
         braking=brakeLightsActive(input,car.speed);
         car.update(dt,input,t);
