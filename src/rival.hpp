@@ -56,17 +56,19 @@ struct Rival {
         if(ground.found){car.ground=ground;s=ground.s;lane=ground.lateral;}
         speed=car.groundSpeed();
         const float look=clampf(10.0f+speed*1.0f,12.0f,40.0f);
-        const auto aim=pose(t,s+look), near=pose(t,s+4), far=pose(t,s+(level==2?50:65));
-        const float targetLane=preferredLane + (level==2 ? .4f : 0.0f);
+        const auto aim=pose(t,s+look), near=pose(t,s+4), far=pose(t,s+50);
+        const float targetLane=preferredLane + .4f;
         const float tx=aim.x+std::cos(aim.yaw)*targetLane-car.x;
         const float tz=aim.z-std::sin(aim.yaw)*targetLane-car.z;
         const float heading=std::atan2(tx,tz);
         const float error=wrapPi(heading-car.yaw);
         const float bend=std::fabs(wrapPi(far.yaw-near.yaw));
-        const float corner[3]={22.0f,28.0f,26.0f};
-        float target=finished?0.0f:VehicleTuning::maxSpeed+(corner[level]-VehicleTuning::maxSpeed)*clampf(level==2 ? (bend-.1f)/1.2f : (bend-.05f)/.65f,0,1);
+        const float corner[3]={26.0f,26.0f,26.0f};
+        const float desiredTop=level==0?39.0f:(level==1?41.0f:VehicleTuning::maxSpeed);
+        float target=finished?0.0f:desiredTop+(corner[level]-desiredTop)*clampf((bend-.1f)/1.2f,0,1);
         const float progress=t.closed ? distanceTravelled/std::max(1.0f,t.length) :
             (s-t.raceStartS)/std::max(1.0f,t.raceFinishS-t.raceStartS);
+        float leadAdjustment=0.0f;
         if (playerS>=0.0f && !finished && level<2) {
             float gap=playerS-s;
             if(t.closed && t.length>0) {
@@ -76,7 +78,8 @@ struct Rival {
             const float leadAllowance=level==0?60.0f:80.0f;
             const float lead=clampf((-gap-leadAllowance)/180.0f,0,1);
             const float weight=level==0?1.0f:clampf((.50f-progress)/.10f,0,1);
-            target*=1.0f-(level==0?.28f:.22f)*lead*weight;
+            leadAdjustment=lead*weight;
+            target*=1.0f-(level==0?.28f:.22f)*leadAdjustment;
             const float catchUp=clampf((gap-200.0f)/100.0f,0,1);
             const float match=clampf(playerSpeed+2.0f,0,VehicleTuning::maxSpeed);
             // Catch up on straights; keep the corner-speed limit where braking is needed.
@@ -84,20 +87,21 @@ struct Rival {
             target+=(std::max(target,match)-target)*catchUp*straightWeight;
         }
         // Ease braking in a slide and let the driver accelerate promptly once grip returns.
-        if (level==2) driftExitTime=car.drifting ? 1.5f : std::max(0.0f,driftExitTime-dt);
-        input.steer=clampf(error*(level==2 ? 9.0f : 5.5f)-car.yawRate*(level==2 ? .3f : .45f)-(level==2 ? 2.0f*car.slipAngle : 0.0f),-1.0f,1.0f);
-        input.throttle=(!finished && (speed<target || (level==2 && driftExitTime>0.0f && speed<target+5.0f)) && !car.drifting && std::fabs(car.slipAngle)<(level==2?.20f:.12f))?1.0f:0.0f;
+        driftExitTime=car.drifting ? 1.5f : std::max(0.0f,driftExitTime-dt);
+        const float leadSteerBlend=clampf((leadAdjustment-.15f)*20.0f,0.0f,1.0f);
+        input.steer=clampf(error*(9.0f-3.5f*leadSteerBlend)-car.yawRate*(.3f+.15f*leadSteerBlend)-2.0f*(1.0f-leadSteerBlend)*car.slipAngle,-1.0f,1.0f);
+        input.throttle=(!finished && (speed<target || (driftExitTime>0.0f && speed<target+5.0f)) && !car.drifting && std::fabs(car.slipAngle)<.20f)?1.0f:0.0f;
         // Apply the same full throttle available to the player while the slide is controllable.
-        if(level==2 && !finished && car.drifting && speed<target && std::fabs(car.slipAngle)<.55f)
+        if(!finished && leadSteerBlend<.5f && car.drifting && speed<target && std::fabs(car.slipAngle)<.55f)
             input.throttle=1.0f;
-        input.brake=(speed>target+(level==2 ? 4.0f : 1.0f)) ? clampf((speed-target)*(level==2 ? .05f : .20f),0,1) : 0.0f;
-        if(level==2 && car.drifting) input.brake=std::min(input.brake,.08f);
-        if(level==2 && input.throttle>0.0f) input.brake=0.0f;
+        input.brake=(speed>target+4.0f) ? clampf((speed-target)*.05f,0,1) : 0.0f;
+        if(car.drifting) input.brake=std::min(input.brake,.08f);
+        if(input.throttle>0.0f) input.brake=0.0f;
         // Predict outward drift in road coordinates and lift before reaching the rail.
         if (car.ground.found) {
             const float lateralSpeed=car.velX*car.ground.rightX+car.velZ*car.ground.rightZ;
-            const float projected=lane+lateralSpeed*.6f;
-            const float safeLateral=std::max(1.0f,t.halfWidth-.15f);
+            const float projected=lane+lateralSpeed*(level==2 ? .6f : .75f);
+            const float safeLateral=std::max(1.0f,t.halfWidth-(level==2 ? .1f : .4f));
             if (std::fabs(projected)>safeLateral && projected*lateralSpeed>0.0f) {
                 input.throttle=0.0f;
                 input.brake=std::max(input.brake,.08f);
