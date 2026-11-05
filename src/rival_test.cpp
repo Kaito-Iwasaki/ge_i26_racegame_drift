@@ -21,6 +21,8 @@ int main(int argc,char**argv) {
     frames++;
    }
    assert(r.finished && drifting>10); assert(wallFrames==0); times[level]=frames/60.f;
+   if(level==0) assert(times[level]>255.0f && times[level]<265.0f);
+   if(level==1) assert(times[level]>235.0f && times[level]<245.0f);
    if(level==2) { assert(times[level]<218.0f); assert(wallFrames==0); assert(exitAcceleration>0); assert(driftThrottle>0); assert(brakeFrames<35*60); assert(brakeTotal/60.0f<8.0f); }
    printf("%s level %d %.1fs drift frames %d max gain %.4f m/s\n",uphill?"UP":"DOWN",level,times[level],drifting,maxGain);
    printf("  wall contact frames %d\n",wallFrames);
